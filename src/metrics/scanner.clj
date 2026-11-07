@@ -1,10 +1,11 @@
 (ns metrics.scanner
-  "A small lexer for Clojure source text.  The reader discards what line counting
-  needs, so this keeps it: where strings, comments and discards are, which strings
-  are docstrings, and which line each list closes on.
+  "A small lexer for Lisp source text.  A reader discards what line counting needs,
+  so this keeps it: where strings, comments and discards are, which strings are
+  docstrings, and which line each list closes on.
 
-  It works on any text, balanced or not: an unterminated string runs to the end,
-  and an unmatched delimiter is simply ignored.")
+  The machinery is shared, and a syntax map says what a language's tokens are; this
+  namespace holds Clojure's.  It works on any text, balanced or not: an unterminated
+  string runs to the end, and an unmatched delimiter is simply ignored.")
 
 ;; --- tokens --------------------------------------------------------------
 
@@ -12,7 +13,7 @@
 (def ^:private whitespace? #{\space \tab \newline \return \formfeed \,})
 (def ^:private prefix? #{\' \` \~ \@})
 
-(defn- string-end
+(defn string-end
   "The index just past the string whose opening quote is at i."
   [s i]
   (let [n (count s)]
@@ -23,7 +24,7 @@
         (= \" (nth s j)) (inc j)
         :else (recur (inc j))))))
 
-(defn- line-end
+(defn line-end
   "The index of the newline ending the line that holds i, or the end of s."
   [s i]
   (let [n (count s)]
@@ -32,7 +33,7 @@
         j
         (recur (inc j))))))
 
-(defn- atom-end
+(defn atom-end
   "The index just past the atom starting at i."
   [s i]
   (let [n (count s)]
@@ -46,10 +47,10 @@
 ;; A token reader takes the text and a token's start, and returns [kind end], where
 ;; end is the index just past the token.
 
-(defn- comment-token [s i]
+(defn comment-token [s i]
   [:comment (line-end s i)])
 
-(defn- string-token [s i]
+(defn string-token [s i]
   [:string (string-end s i)])
 
 (defn- char-token
@@ -58,10 +59,10 @@
   [s i]
   [:atom (atom-end s (min (count s) (+ i 2)))])
 
-(defn- atom-token [s i]
+(defn atom-token [s i]
   [:atom (max (inc i) (atom-end s i))])
 
-(defn- one-char [kind]
+(defn one-char [kind]
   (fn [_ i] [kind (inc i)]))
 
 (def ^:private dispatch-readers
@@ -76,7 +77,7 @@
         reader (get dispatch-readers following (one-char :prefix))]
     (reader s i)))
 
-(def ^:private token-readers
+(def ^:private clojure-readers
   (merge (zipmap [\( \[ \{] (repeat (one-char :open)))
          (zipmap [\) \] \}] (repeat (one-char :close)))
          (zipmap prefix? (repeat (one-char :prefix)))
@@ -87,32 +88,36 @@
           \# dispatch-token}))
 
 (defn- token-at
-  "The token starting at i, with where it begins and where scanning goes next."
-  [s i line col]
-  (let [reader (get token-readers (nth s i) atom-token)
-        [kind end] (reader s i)
-        text (subs s i (min end (count s)))
-        breaks (count (filter #(= \newline %) text))]
+  "The token starting at i, and where scanning goes next."
+  [s i readers]
+  (let [reader (get readers (nth s i) atom-token)
+        [kind end] (reader s i)]
     {:kind kind
-     :text text
-     :line line
-     :col col
-     :end-line (+ line breaks)
-     :next end
-     :next-col (if (pos? breaks)
-                 (- (count text) (.lastIndexOf text "\n"))
-                 (+ col (count text)))}))
+     :text (subs s i (min end (count s)))
+     :next end}))
 
-(defn- tokens
-  "The tokens of s, each {:kind :text :line :col :end-line}."
-  [s]
+(defn- placed
+  "A token with where it begins and ends, starting at line and col."
+  [{:keys [text] :as t} line col]
+  (let [breaks (count (filter #(= \newline %) text))]
+    (assoc t
+           :line line
+           :col col
+           :end-line (+ line breaks)
+           :next-col (if (pos? breaks)
+                       (- (count text) (.lastIndexOf text "\n"))
+                       (+ col (count text))))))
+
+(defn tokens
+  "The tokens of s under a syntax, each {:kind :text :line :col :end-line}."
+  [s {:keys [readers whitespace]}]
   (let [n (count s)]
     (loop [i 0, line 1, col 1, out []]
       (cond
         (>= i n) out
         (= \newline (nth s i)) (recur (inc i) (inc line) 1 out)
-        (whitespace? (nth s i)) (recur (inc i) line (inc col) out)
-        :else (let [t (token-at s i line col)]
+        (contains? whitespace (nth s i)) (recur (inc i) line (inc col) out)
+        :else (let [t (placed (token-at s i readers) line col)]
                 (recur (:next t) (:end-line t) (:next-col t) (conj out t)))))))
 
 ;; --- structure -----------------------------------------------------------
@@ -230,25 +235,34 @@
 
 (defn- list-extents
   "{[line col] end-line} for every list that opens and closes."
-  [toks matches]
+  [toks matches list-opens]
   (into {}
         (for [[open close] matches
               :let [t (get toks open)]
-              :when (= "(" (:text t))]
+              :when (contains? list-opens (:text t))]
           [[(:line t) (:col t)] (:end-line (get toks close))])))
+
+(def clojure-syntax
+  "What a token is in Clojure source.  :doc-indexes finds the docstrings; a list
+  opens with a paren."
+  {:readers clojure-readers
+   :whitespace whitespace?
+   :doc-indexes doc-indexes
+   :list-opens #{"("}})
 
 (defn scan
   "Scan source into {:classes [per-line :blank|:comment|:code]
                      :extents {[line col] end-line of the list opening there}}."
-  [source]
-  (let [toks (tokens source)
-        matches (matching-closes toks)]
-    {:classes (classify-lines source toks
-                              (doc-indexes toks matches)
-                              (discarded-indexes toks matches))
-     :extents (list-extents toks matches)}))
+  ([source] (scan source clojure-syntax))
+  ([source {:keys [doc-indexes list-opens] :as syntax}]
+   (let [toks (tokens source syntax)
+         matches (matching-closes toks)]
+     {:classes (classify-lines source toks
+                               (doc-indexes toks matches)
+                               (discarded-indexes toks matches))
+      :extents (list-extents toks matches list-opens)})))
 
 (defn line-classes
-  "The class of each line of source: :blank, :comment or :code."
+  "The class of each line of Clojure source: :blank, :comment or :code."
   [source]
   (:classes (scan source)))
