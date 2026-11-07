@@ -4,8 +4,8 @@
   analyze-source computes every metric for one file; analyze-files resolves
   architecture coupling across files and rolls the project up."
   (:require [metrics.reader :as reader]
+            [metrics.language :as language]
             [metrics.loc :as loc]
-            [metrics.scanner :as scanner]
             [metrics.cyclomatic :as cyclomatic]
             [metrics.cognitive :as cognitive]
             [metrics.halstead :as halstead]
@@ -14,8 +14,7 @@
             [metrics.hotspot :as hotspot]
             [metrics.queue :as queue]
             [metrics.cleanup :as cleanup]
-            [jolt.fs :as fs]
-            [clojure.string :as str]))
+            [jolt.fs :as fs]))
 
 (defn- average
   "The mean of xs, or nil when there is nothing to average."
@@ -104,21 +103,36 @@
    :cognitive (+ (cognitive/complexity (:top-level-flow model))
                  (reduce + 0 (map :cognitive fns)))})
 
+(defn- language-of
+  "The adapter for a path, which has to have one."
+  [path]
+  (or (language/of path)
+      (throw (ex-info (str "not a language we analyze: " path) {:path path}))))
+
+(defn- file-facts
+  "What a file is, apart from its scores."
+  [path lang model]
+  (merge
+   (select-keys model [:libspecs :symbols :qualifiers])
+   {:path path
+    :namespace (some-> (:namespace model) str)
+    :language (:id lang)
+    :unused-public? (:unused-public? lang)
+    :imports (mapv str (:imports model))}))
+
 (defn analyze-source
   "Every metric for one file's source."
   [path source]
-  (let [model (reader/analyze-file path source)
-        scanned (scanner/scan source)
+  (let [lang (language-of path)
+        {:keys [forms dependencies]} ((:parse lang) source)
+        model (reader/analyze-forms path forms dependencies)
+        scanned ((:scan lang) source)
         locs (loc/tally (:classes scanned))
         fns (mapv #(function-metrics % scanned) (:functions model))
         file-h (average-halstead (map :halstead fns))]
     (merge
-     (select-keys model [:libspecs :symbols :qualifiers])
-     {:path path
-      :namespace (some-> (:namespace model) str)
-      :language :clojure
-      :loc locs
-      :imports (mapv str (:imports model))
+     (file-facts path lang model)
+     {:loc locs
       :functions (mapv #(dissoc % :halstead) fns)
       :halstead file-h}
      (file-scores model fns)
@@ -157,7 +171,7 @@
   "A file's metrics without what only the cleanup and queue passes needed."
   [file]
   (-> file
-      (dissoc :symbols :qualifiers :libspecs)
+      (dissoc :symbols :qualifiers :libspecs :unused-public?)
       (update :functions (fn [fns] (mapv #(dissoc % :self-refs) fns)))))
 
 (defn- load-all
@@ -231,16 +245,14 @@
   ([file-sources opts]
    (analyze-loaded (map (fn [[p s]] [p (constantly s)]) file-sources) opts)))
 
-(def source-extensions #{"clj" "cljs" "cljc" "jolt"})
-
 (defn analyze-dir
-  "Analyze every Clojure/Jolt source file under a directory; opts as for
+  "Analyze every source file of a language we know under a directory; opts as for
   analyze-files."
   ([dir] (analyze-dir dir nil))
   ([dir opts]
-   (let [paths (for [p (fs/glob dir "**.clj*")
-                     :let [ext (str/lower-case (or (fs/extension p) ""))]
-                     :when (contains? source-extensions ext)]
-                 (str p))
-         paths (concat paths (map str (fs/glob dir "**.jolt")))]
-     (analyze-loaded (for [p (distinct paths)] [p #(slurp p)]) opts))))
+   (let [paths (->> (language/globs)
+                    (mapcat #(fs/glob dir %))
+                    (map str)
+                    (filter language/of)
+                    distinct)]
+     (analyze-loaded (for [p paths] [p #(slurp p)]) opts))))

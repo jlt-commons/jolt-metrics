@@ -33,10 +33,11 @@
          (function-entry file f))))
 
 (defn unused-public
-  "Public functions nothing else in the analyzed files mentions."
+  "Public functions nothing else in the analyzed files mentions, in languages where
+  that means something.  Every file's mentions count, whatever its language."
   [files]
   (let [symbols (apply merge-with + {} (map :symbols files))]
-    (vec (for [file files
+    (vec (for [file (filter :unused-public? files)
                f (candidates file false)
                :when (and (not (entry-point? f))
                           (<= (other-references symbols f) 0))]
