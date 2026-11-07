@@ -25,12 +25,11 @@
     0.0))
 
 (defn maintainability-index
-  "The index from Halstead volume V, cyclomatic complexity G, logical LOC lloc,
-  total LOC loc and comment LOC cloc.  nil when V <= 0 or lloc <= 0."
-  [V G lloc loc cloc]
+  "The index from Halstead volume V, cyclomatic complexity G, logical LOC lloc and
+  the comment-weight of the same scope.  nil when V <= 0 or lloc <= 0."
+  [V G lloc cw]
   (when (and (pos? V) (pos? lloc))
-    (let [woc (mi-without-comments V G lloc)
-          cw  (comment-weight loc cloc)]
+    (let [woc (mi-without-comments V G lloc)]
       {:maintainability-index (+ woc cw)
        :maintainability-index-without-comments woc
        :comment-weight cw})))

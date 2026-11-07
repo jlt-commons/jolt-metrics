@@ -4,9 +4,10 @@ description: >-
   Use when working in the jolt-metrics library: a Jolt code-metrics library
   that computes LOC, cyclomatic and cognitive complexity, Halstead metrics,
   the maintainability index, and architecture coupling over Clojure/Jolt
-  source, and renders a Markdown report. Covers adding or changing a metric
-  (write its writ spec first, then the pure implementation), the normalized
-  model, the reader adapter, and the coupling/aggregation/report pipeline.
+  source, and renders a report led by a ranked refactoring queue. Covers adding
+  or changing a metric (write its writ spec first, then the pure implementation),
+  the normalized model, the reader and scanner, and the coupling, queue and
+  report pipeline.
 ---
 
 # jolt-metrics
@@ -17,23 +18,31 @@ computation is checked against a writ spec, not just unit tests.
 ## Layering
 
 ```
-source ──► normalized model ──► pure metric visitors ──► markdown report
-   reader.clj   functions /          halstead.clj            report.clj
-                decision-kinds /     maintainability.clj
-                flow-tree /          cyclomatic.clj
-                operators / imports  cognitive.clj
-                                     coupling.clj
-                loc.clj (line-based, works off the raw text)
+source ──► normalized model ──► pure metric visitors ──► queue ──► report
+  reader.clj, scanner.clj       halstead.clj             queue.clj  report.clj
+                                maintainability.clj      cleanup.clj
+                                cyclomatic.clj
+                                cognitive.clj
+                                coupling.clj
+                                hotspot.clj, rules.clj
+                                loc.clj (over scanner's line classes)
 ```
 
 - **`metrics.reader`** is plain Clojure (not writ-checked): it reads forms with
-  `clojure.core/read` and maps them to the normalized model. It may use `map`,
-  `reduce`, mutual recursion, `case` freely.
+  `clojure.core/read` and maps them to the normalized model. Every walker goes
+  through `code-children`, so the metrics can't disagree about what is code.
+- **`metrics.scanner`** is plain Clojure too: a lexer over the raw text, total on
+  any input, for docstrings, discards and where each list ends.
 - **`metrics.*`** metric namespaces are pure and writ-constrained: single-arity
   fns, no interop, recursion only via `case`-destructured fields of a `data`
   type (or `rest`/`dec` under a test). They never mention writ and never do I/O.
-- **`metrics.core`** orchestrates parse → per-file → coupling → summary.
+- **`metrics.core`** orchestrates parse → per-file → coupling → queue → summary.
+- **`metrics.queue`** holds the thresholds and ranks the findings; **`metrics.cleanup`**
+  finds what looks unused; **`metrics.git`** reads churn and is the only shell-out.
 - **`metrics.report`** renders Markdown; **`metrics.cli`** is the entry point.
+
+Reading is safe by construction: `read-forms` binds `*read-eval*` to false and reads
+in a scratch namespace. Keep it that way, since the source is untrusted data.
 
 ## Adding a metric (spec first)
 
@@ -54,18 +63,29 @@ writ rules that have cost time here:
   `:tested`; mark them `{:require :tested :because "..."}`.
 - The gap check fails when a `forall` is missing for a fn — a handful of literal
   examples don't pin a function down.
+- Every public fn in a writ-checked namespace needs an `ann`; a helper must be
+  `defn-`.
+- A law's model recomputes the formula, so it guards arithmetic, not what the reader
+  feeds in. Pin reader behaviour with golden examples in `walker_test.clj`.
 
 ## The decision table (cyclomatic)
 
-1 per: `if if-not if-let if-some when when-not when-let when-some`;
-1 per non-`:else`/`true` `cond`/`condp` clause; 1 per non-default `case`;
-1 per `and`/`or`; 1 per `for doseq dotimes while loop`; 1 per `catch`
-(`try` itself is not a branch). Keep this table and `metrics.reader` in sync.
+1 per: `if if-not if-let if-some when when-not when-let when-some when-first`;
+1 per `cond` clause except a trailing keyword or `true`; 1 per `condp` clause except
+a lone trailing form; 1 per non-default `case`; 1 per `cond->`/`cond->>` clause;
+n-1 per `and`/`or` of n arguments; 1 per `for`/`doseq` binding, `:when` or `:while`;
+1 per `dotimes while loop`; 1 per `catch` (`try` itself is not a branch). Keep this
+table and `metrics.reader` in sync.
+
+Cognitive follows the SonarSource paper, with a free plain `else` and no recursion
+increment. `cond` is an else-if chain, `cond->` a series of ifs, and `case`/`condp`
+are switches: see the `tree-builders` in `metrics.reader`.
 
 ## Commands
 
 - `jolt -M:test:dev` — run all writ specs + reader tests.
-- `jolt -m metrics.cli <dir> [out.md]` — the Markdown report.
+- `jolt -m metrics.cli <dir> [out] [--format md|edn] [--top N] [--days N] [--no-git]`
+  — the report.
 
 Note: running `jolt -M:test:dev` relies on `:main-opts` in `deps.edn`; do not
 also pass `-m metrics.runner` on the CLI, or it leaks into the runner's args.
@@ -73,6 +93,11 @@ also pass `-m metrics.runner` on the CLI, or it leaks into the runner's args.
 ## Conventions
 
 - Metric namespaces return plain maps; `metrics.core` aggregates them.
-- The file-level Halstead is the average of its functions'; the file-level
-  maintainability index uses that average volume plus the file's cyclomatic,
-  logical LOC, LOC and comment LOC.
+- The file-level Halstead is the average of its definitions', skipping empty ones.
+  The file-level index is the original formula: the average volume, complexity and
+  source lines of its definitions. A definition's index uses its own lines.
+- The report ranks on the comment-free index; the comment term is informational.
+- `maintainability-index` takes the comment weight rather than loc and cloc, so
+  callers work it out with `comment-weight`.
+- A threshold change belongs in `metrics.queue` (or `mi-band` in `metrics.rules`).
+  Update the README's table too, including where the number comes from.

@@ -3,7 +3,7 @@
 
   A function's complexity is 1 plus its decision points; a container's is the
   sum of the branches it opens itself and the complexity of what it declares."
-  (:require [writ.spec :refer [spec ann law refine graph]]
+  (:require [writ.spec :refer [spec ann law graph]]
             [metrics.cyclomatic :as cyc]))
 
 (spec metrics.cyclomatic {:require :proved})

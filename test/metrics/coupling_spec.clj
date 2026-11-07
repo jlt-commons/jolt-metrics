@@ -3,7 +3,7 @@
 
   efferent maps each module to the set it depends on; afferent is the inverse.
   Instability is Ce/(Ce+Ca), 0 with no coupling at all."
-  (:require [writ.spec :refer [spec ann law refine graph]]
+  (:require [writ.spec :refer [spec ann law graph]]
             [metrics.coupling :as cp]))
 
 (spec metrics.coupling {:require :proved})

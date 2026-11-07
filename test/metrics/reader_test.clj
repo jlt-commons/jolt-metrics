@@ -34,7 +34,7 @@
 (deftest extracts-functions
   (let [fns (r/functions '[(defn f [x] (if x 1 2)) (def g 3)])]
     (is (= 1 (count fns)))
-    (is (= 'f (:name (first fns))))
+    (is (= "f" (:name (first fns))))
     (is (= '[(if x 1 2)] (:body (first fns))))))
 
 (deftest flow-tree-if
@@ -61,3 +61,35 @@
     (is (= 2 (count (:functions model))))
     (is (= [:if] (:decision-kinds (first (:functions model)))))
     (is (= 'clojure.string (first (:imports model))))))
+
+;; --- imports -------------------------------------------------------------
+
+(deftest prefix-lists-expand
+  (is (= '[clojure.string clojure.set x.y x.z]
+         (r/imports '[(ns a (:require [clojure [string :as s] [set]] (x y z)))]))))
+
+(deftest nested-prefix-lists-expand
+  (is (= '[a.b.c] (r/imports '[(ns z (:require [a [b [c :as d]]]))]))))
+
+(deftest a-libspec-with-options-is-not-a-prefix
+  (is (= '[b.c] (r/imports '[(ns a (:use [b.c :only [d]]))]))))
+
+(deftest import-names-the-package
+  (is (= '[java.util java.io foo.Bar]
+         (r/imports '[(ns a (:import [java.util Date] (java.io File) foo.Bar))]))))
+
+(deftest macro-requires-count
+  (is (= '[b.c] (r/imports '[(ns a (:require-macros [b.c :as d]))])))
+  (is (= '[b.c] (r/imports '[(ns a (:use-macros [b.c :only [d]]))]))))
+
+(deftest refer-clojure-is-not-a-dependency
+  (is (= [] (r/imports '[(ns a (:refer-clojure :exclude [map]))]))))
+
+(deftest top-level-require-counts
+  (is (= '[b.c e f.g] (r/imports '[(require '[b.c :as d] 'e :reload)
+                                   (use '[f.g])
+                                   (require dynamic)])))
+  (is (= '[a b] (r/imports '[(ns a2 (:require [a])) (do (require 'b))]))))
+
+(deftest string-libspecs-are-external
+  (is (= [] (r/imports '[(ns a (:require ["react" :as r]))]))))
