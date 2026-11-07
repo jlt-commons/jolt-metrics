@@ -215,29 +215,38 @@
           classes
           (range (:line t) (inc (:end-line t)))))
 
+(defn- classify-lines
+  "The class of each line, from the tokens that touch it."
+  [source toks docs discarded]
+  (reduce
+   (fn [cs [i t]]
+     (mark cs t (if (or (= :comment (:kind t))
+                        (contains? docs i)
+                        (contains? discarded i))
+                  :comment
+                  :code)))
+   (vec (repeat (line-count source) :blank))
+   (map-indexed vector toks)))
+
+(defn- list-extents
+  "{[line col] end-line} for every list that opens and closes."
+  [toks matches]
+  (into {}
+        (for [[open close] matches
+              :let [t (get toks open)]
+              :when (= "(" (:text t))]
+          [[(:line t) (:col t)] (:end-line (get toks close))])))
+
 (defn scan
   "Scan source into {:classes [per-line :blank|:comment|:code]
                      :extents {[line col] end-line of the list opening there}}."
   [source]
   (let [toks (tokens source)
-        matches (matching-closes toks)
-        docs (doc-indexes toks matches)
-        discarded (discarded-indexes toks matches)
-        classes (reduce
-                 (fn [cs [i t]]
-                   (mark cs t (if (or (= :comment (:kind t))
-                                      (contains? docs i)
-                                      (contains? discarded i))
-                                :comment
-                                :code)))
-                 (vec (repeat (line-count source) :blank))
-                 (map-indexed vector toks))
-        extents (into {}
-                      (for [[open close] matches
-                            :let [t (get toks open)]
-                            :when (= "(" (:text t))]
-                        [[(:line t) (:col t)] (:end-line (get toks close))]))]
-    {:classes classes :extents extents}))
+        matches (matching-closes toks)]
+    {:classes (classify-lines source toks
+                              (doc-indexes toks matches)
+                              (discarded-indexes toks matches))
+     :extents (list-extents toks matches)}))
 
 (defn line-classes
   "The class of each line of source: :blank, :comment or :code."

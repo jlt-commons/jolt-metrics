@@ -4,12 +4,13 @@
   (:require [metrics.rules :as rules]))
 
 (def function-limits
-  "[good ok warning] per function, where higher is worse."
+  "[good ok warning] per function, where higher is worse.  Above ok is a warning
+  and above warning is critical.  The README lists where each limit comes from."
   {:cyclomatic [5 10 20]
    :cognitive [5 15 25]
    :nesting [2 3 5]
-   :params [3 5 7]
-   :lines [15 30 50]})
+   :params [3 4 7]
+   :lines [10 20 50]})
 
 (def file-limits
   "[good ok warning] per file: source lines as in metripy, dependencies as in
@@ -51,13 +52,14 @@
        :limit (if (= :critical b) warning ok)
        :band b})))
 
-(defn- mi-violation
-  "Only the critical band counts here.  The index is calibrated on statement-based
-  languages, and on Clojure the warning band catches a third to a half of ordinary
-  functions; those that matter break a more specific rule anyway."
-  [mi]
-  (when (and mi (= :critical (rules/mi-band mi)))
-    {:rule :maintainability :value mi :limit 40.0 :band :critical}))
+(def ^:private mi-limits
+  {:warning 38.0 :critical 10.0})
+
+(defn- mi-violation [mi]
+  (when mi
+    (let [b (rules/mi-band mi)]
+      (when (rules/flagged? b)
+        {:rule :maintainability :value mi :limit (get mi-limits b) :band b}))))
 
 (defn- function-metrics [f]
   {:cyclomatic (:cyclomatic f)

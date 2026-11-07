@@ -17,29 +17,23 @@
 (defn complexity-at
   "Cognitive complexity of node, which sits at nesting depth."
   [node depth]
-  (case (first node)
-    :Leaf 0
-    :Seq (let [[_ head tail] node]
-           (+ (complexity-at head depth) (complexity-at tail depth)))
-    :If (let [[_ test then else-node] node]
-          (+ 1 depth
-             (complexity-at test (inc depth))
-             (complexity-at then (inc depth))
-             (complexity-at else-node depth)))
-    :Else (let [[_ inner] node]
-            (case (first inner)
-              :If (let [[_ test then else-node] inner]
-                    (+ 1
-                       (complexity-at test (inc depth))
-                       (complexity-at then (inc depth))
-                       (complexity-at else-node depth)))
-              (complexity-at inner (inc depth))))
-    :Nest (let [[_ body] node]
-            (+ 1 depth (complexity-at body (inc depth))))
-    :Flat (let [[_ body] node]
-            (+ 1 (complexity-at body depth)))
-    :Deep (let [[_ body] node]
-            (complexity-at body (inc depth)))))
+  (let [inner (inc depth)]
+    (case (first node)
+      :Leaf 0
+      :Seq (let [[_ head tail] node]
+             (+ (complexity-at head depth) (complexity-at tail depth)))
+      :If (let [[_ test then else-node] node]
+            (+ 1 depth (complexity-at test inner) (complexity-at then inner)
+               (complexity-at else-node depth)))
+      :Else (let [[_ else-body] node]
+              (case (first else-body)
+                :If (let [[_ test then else-node] else-body]
+                      (+ 1 (complexity-at test inner) (complexity-at then inner)
+                         (complexity-at else-node depth)))
+                (complexity-at else-body inner)))
+      :Nest (let [[_ body] node] (+ 1 depth (complexity-at body inner)))
+      :Flat (let [[_ body] node] (+ 1 (complexity-at body depth)))
+      :Deep (let [[_ body] node] (complexity-at body inner)))))
 
 (defn complexity
   "Cognitive complexity of a function body tree."
@@ -49,25 +43,21 @@
 (defn nesting-at
   "The deepest nesting level under node, which sits at nesting depth."
   [node depth]
-  (case (first node)
-    :Leaf 0
-    :Seq (let [[_ head tail] node]
-           (max (nesting-at head depth) (nesting-at tail depth)))
-    :If (let [[_ test then else-node] node]
-          (max (inc depth)
-               (nesting-at test (inc depth))
-               (nesting-at then (inc depth))
-               (nesting-at else-node depth)))
-    :Else (let [[_ inner] node]
-            (case (first inner)
-              :If (nesting-at inner depth)
-              (nesting-at inner (inc depth))))
-    :Nest (let [[_ body] node]
-            (max (inc depth) (nesting-at body (inc depth))))
-    :Flat (let [[_ body] node]
-            (nesting-at body depth))
-    :Deep (let [[_ body] node]
-            (nesting-at body (inc depth)))))
+  (let [inner (inc depth)]
+    (case (first node)
+      :Leaf 0
+      :Seq (let [[_ head tail] node]
+             (max (nesting-at head depth) (nesting-at tail depth)))
+      :If (let [[_ test then else-node] node]
+            (max inner (nesting-at test inner) (nesting-at then inner)
+                 (nesting-at else-node depth)))
+      :Else (let [[_ else-body] node]
+              (case (first else-body)
+                :If (nesting-at else-body depth)
+                (nesting-at else-body inner)))
+      :Nest (let [[_ body] node] (max inner (nesting-at body inner)))
+      :Flat (let [[_ body] node] (nesting-at body depth))
+      :Deep (let [[_ body] node] (nesting-at body inner)))))
 
 (defn max-nesting
   "How deeply a function body's control structures nest; a closure counts as a

@@ -59,20 +59,23 @@ evaluates the source: `#=` is a read error.
 6. **Files** and **Architecture**: the numbers per file, coupling, and dependencies.
 7. **Thresholds**: what the severities mean.
 
-| Rule | Warning | Critical |
-|---|---|---|
-| Cyclomatic complexity | > 10 | > 20 |
-| Cognitive complexity | > 15 | > 25 |
-| Nesting depth | > 3 | > 5 |
-| Function source lines | > 30 | > 50 |
-| Function parameters | > 5 | > 7 |
-| Maintainability index (comment-free) | | <= 40 |
-| File source lines | > 500 | > 1000 |
-| File dependencies | > 19 | > 39 |
-| Hotspot risk (at least 3 changes) | >= 0.5 | >= 0.8 |
+| Rule | Warning | Critical | Where the limits come from |
+|---|---|---|---|
+| Cyclomatic complexity | > 10 | > 20 | [NIST SP 500-235](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication500-235.pdf) and [PMD](https://docs.pmd-code.org/latest/pmd_rules_java_design.html) use 10; [ESLint](https://eslint.org/docs/latest/rules/complexity) uses 20 |
+| Cognitive complexity | > 15 | > 25 | [Sonar's default](https://community.sonarsource.com/t/s3776-reason-for-the-current-default-value-of-15/127103) is 15, and 25 for C-family languages; PMD uses 15 |
+| Nesting depth | > 3 | > 5 | PMD flags 3 nested `if`s; [ESLint](https://eslint.org/docs/latest/rules/max-depth) uses 4 |
+| Function source lines | > 20 | > 50 | the [Clojure style guide](https://guide.clojure.style/) says 10; [ESLint](https://eslint.org/docs/latest/rules/max-lines-per-function) uses 50 |
+| Function parameters | > 4 | > 7 | the Clojure style guide says three or four; [Checkstyle](https://checkstyle.org/checks/sizes/parameternumber.html) uses 7 |
+| Maintainability index (comment-free) | <= 38 | < 10 | the original limit of 65, rescaled by 100/171; [Visual Studio](https://learn.microsoft.com/en-us/visualstudio/code-quality/code-metrics-maintainability-index-range-and-meaning) turns red below 10 |
+| File source lines | > 500 | > 1000 | [metripy](https://github.com/zimmer-yan/metripy); [ESLint](https://eslint.org/docs/latest/rules/max-lines) uses 300 and [Checkstyle](https://checkstyle.org/checks/sizes/filelength.html) 2000 |
+| File dependencies | > 19 | > 39 | [Checkstyle](https://checkstyle.org/checks/metrics/classfanoutcomplexity.html) and PMD use 20 for classes; ast-metrics uses 20 and 40 |
+| Hotspot risk (at least 3 changes) | >= 0.5 | >= 0.8 | no published standard; these are our choice |
 
-The index's warning band isn't used: on Clojure it catches a third to a half of
-ordinary functions, and those that matter break a more specific rule anyway.
+Function length sits between the Clojure style guide and general-purpose tools.
+Taken literally, the guide's 10 lines flags a quarter of the functions in the
+Clojure projects we measured, while 20 flags about one in ten. These limits are
+rules of thumb rather than research results; even NIST calls the exact number
+"somewhat controversial".
 
 ### API
 
@@ -166,14 +169,22 @@ Cyclomatic complexity counts one decision point per:
 - `dotimes while loop` — 1
 - `catch` — 1 (`try` itself is not a branch)
 
-Cognitive complexity follows the SonarSource rules, except that a plain `else` is
-free, since nearly every Clojure `if` has one:
+Cognitive complexity follows the [SonarSource
+paper](https://www.sonarsource.com/docs/CognitiveComplexity.pdf):
 
-- `if`/`when`/`cond`/`condp`/`case`/`cond->`/loops/`catch` add 1 plus nesting depth
-- an else-if adds a flat 1
+- `if`/`when`/`condp`/`case`/loops/`catch` add 1 plus nesting depth
+- `cond` is an if/else-if chain, so its first test costs like an `if` and each later
+  one like an else-if; `case` and `condp` count as a `switch`
+- `cond->` is a series of independent `if`s
+- an else-if adds a flat 1, including an `if` directly inside an `else`
 - a run of a logical operator adds a flat 1
-- `try` adds nothing
+- `try` and `finally` add nothing, nor do `some->` and friends, like the paper's
+  null-coalescing operators
 - `fn`/`letfn`/`reify`/`proxy` add nothing but nest what they hold
+
+It differs from the paper in two ways. A plain `else` is free, since nearly every
+Clojure `if` has one. Recursion adds nothing, though the paper adds 1 per function
+in a cycle.
 
 ## Tests
 

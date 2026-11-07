@@ -77,8 +77,9 @@ n-1 per `and`/`or` of n arguments; 1 per `for`/`doseq` binding, `:when` or `:whi
 1 per `dotimes while loop`; 1 per `catch` (`try` itself is not a branch). Keep this
 table and `metrics.reader` in sync.
 
-Cognitive follows SonarSource with a free plain `else`: see the `flow-tree` node
-types and `metrics.cognitive`.
+Cognitive follows the SonarSource paper, with a free plain `else` and no recursion
+increment. `cond` is an else-if chain, `cond->` a series of ifs, and `case`/`condp`
+are switches: see the `tree-builders` in `metrics.reader`.
 
 ## Commands
 
@@ -96,5 +97,7 @@ also pass `-m metrics.runner` on the CLI, or it leaks into the runner's args.
   The file-level index is the original formula: the average volume, complexity and
   source lines of its definitions. A definition's index uses its own lines.
 - The report ranks on the comment-free index; the comment term is informational.
-- A threshold or severity change belongs in `metrics.queue`, with the table in the
-  README updated to match.
+- `maintainability-index` takes the comment weight rather than loc and cloc, so
+  callers work it out with `comment-weight`.
+- A threshold change belongs in `metrics.queue` (or `mi-band` in `metrics.rules`).
+  Update the README's table too, including where the number comes from.

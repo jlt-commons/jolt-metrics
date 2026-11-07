@@ -51,31 +51,37 @@
    :maintainability-index-without-comments (:maintainability-index-without-comments mi)
    :comment-weight (:comment-weight mi)})
 
+(defn- scope-index
+  "The index of a scope with volume V and complexity G, size lines long, whose
+  comment ratio comes from locs."
+  [V G lines locs]
+  (maintainability/maintainability-index
+   V G lines (maintainability/comment-weight (:loc locs) (:cloc locs))))
+
+(defn- function-scores
+  "A definition's complexity and size scores."
+  [f h cc locs]
+  {:cyclomatic cc
+   :cognitive (cognitive/complexity (:flow f))
+   :nesting (cognitive/max-nesting (:flow f))
+   :halstead h
+   :halstead-volume (:volume h)
+   :locs locs})
+
 (defn- function-metrics
   "Every metric of one definition.  The index uses the definition's own lines, so
   comments elsewhere in the file cannot change it."
   [f scanned]
   (let [h (halstead/calculate (:operators f) (:operands f))
         cc (cyclomatic/complexity (:decision-kinds f))
-        {:keys [end-line locs]} (unit-lines f scanned)
-        mi (maintainability/maintainability-index
-            (:volume h) cc (:sloc locs) (:loc locs) (:cloc locs))]
+        {:keys [end-line locs]} (unit-lines f scanned)]
     (merge
+     (select-keys f [:kind :line :lloc :params :self-refs])
      {:name (str (:name f))
-      :kind (:kind f)
-      :line (:line f)
       :end-line end-line
-      :locs locs
-      :lloc (:lloc f)
-      :params (:params f)
-      :private (boolean (:private f))
-      :self-refs (:self-refs f)
-      :cyclomatic cc
-      :cognitive (cognitive/complexity (:flow f))
-      :nesting (cognitive/max-nesting (:flow f))
-      :halstead h
-      :halstead-volume (:volume h)}
-     (index-fields mi))))
+      :private (boolean (:private f))}
+     (function-scores f h cc locs)
+     (index-fields (scope-index (:volume h) cc (:sloc locs) locs)))))
 
 (defn- file-index
   "A file's index is the original formula: the average volume, complexity and size
@@ -84,12 +90,19 @@
   [fns volume locs]
   (let [measured (remove #(zero? (get-in % [:halstead :length])) fns)]
     (when (seq measured)
-      (maintainability/maintainability-index
-       volume
-       (average (map :cyclomatic measured))
-       (average (map #(get-in % [:locs :sloc]) measured))
-       (:loc locs)
-       (:cloc locs)))))
+      (scope-index volume
+                   (average (map :cyclomatic measured))
+                   (average (map #(get-in % [:locs :sloc]) measured))
+                   locs))))
+
+(defn- file-scores
+  "A file's totals: its definitions plus the top-level code around them."
+  [model fns]
+  {:lloc (reduce + 0 (map :lloc fns))
+   :cyclomatic (cyclomatic/file-complexity (:top-level-decision-kinds model)
+                                           (map :cyclomatic fns))
+   :cognitive (+ (cognitive/complexity (:top-level-flow model))
+                 (reduce + 0 (map :cognitive fns)))})
 
 (defn analyze-source
   "Every metric for one file's source."
@@ -105,14 +118,10 @@
       :namespace (some-> (:namespace model) str)
       :language :clojure
       :loc locs
-      :lloc (reduce + 0 (map :lloc fns))
       :imports (mapv str (:imports model))
       :functions (mapv #(dissoc % :halstead) fns)
-      :cyclomatic (cyclomatic/file-complexity (:top-level-decision-kinds model)
-                                              (map :cyclomatic fns))
-      :cognitive (+ (cognitive/complexity (:top-level-flow model))
-                    (reduce + 0 (map :cognitive fns)))
       :halstead file-h}
+     (file-scores model fns)
      (index-fields (file-index fns (:volume file-h) locs)))))
 
 (defn summarize

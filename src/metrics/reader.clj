@@ -14,9 +14,10 @@
     - dotimes while loop -> 1
     - catch -> 1 (try itself is not a branch)
 
-  Cognitive complexity: if/when/cond/case/cond->/loops/catch add 1 plus nesting
-  depth; an else-if and a logical operator run add a flat 1; try adds nothing; a
-  closure (fn, letfn, reify, proxy) adds nothing but nests what it holds.")
+  Cognitive complexity: if/when/condp/case/loops/catch add 1 plus nesting depth; a
+  cond is an if/else-if chain and a cond-> a series of ifs; an else-if and a logical
+  operator run add a flat 1; try adds nothing; a closure (fn, letfn, reify, proxy)
+  adds nothing but nests what it holds.")
 
 ;; --- reading -------------------------------------------------------------
 
@@ -378,13 +379,17 @@
 
 ;; --- decision kinds (cyclomatic) -----------------------------------------
 
+(defn- default-test?
+  "Is this cond test always true, making its clause the default?"
+  [test-form]
+  (or (keyword? test-form) (true? test-form)))
+
 (defn- cond-decision-count
   "One per clause, but a trailing keyword or true test is the default."
   [args]
   (let [tests (take-nth 2 args)
-        n (count tests)
-        lst (last tests)]
-    (if (and (pos? n) (or (keyword? lst) (true? lst)))
+        n (count tests)]
+    (if (and (pos? n) (default-test? (last tests)))
       (dec n)
       n)))
 
@@ -477,6 +482,31 @@
       [:Flat (seq-tree args)]
       (seq-tree args))))
 
+(defn- clause-chain
+  "cond clauses as the if/else-if chain they read as; a trailing default is an else."
+  [[test-form result & more]]
+  (let [else-part (cond
+                    (empty? more) [:Leaf]
+                    (and (= 2 (count more)) (default-test? (first more)))
+                    [:Else (flow-tree (second more))]
+                    :else [:Else (clause-chain more)])]
+    [:If (flow-tree test-form) (flow-tree result) else-part]))
+
+(defn- cond-tree
+  "An else-if chain, not a switch: each test is its own condition to read."
+  [form]
+  (if (seq (rest form))
+    (clause-chain (rest form))
+    [:Leaf]))
+
+(defn- threading-tree
+  "(cond-> x t1 e1 t2 e2) is the value, then an independent if per clause."
+  [form]
+  (let [[value & clauses] (rest form)
+        ifs (map (fn [[t e]] [:If (flow-tree t) (flow-tree e) [:Leaf]])
+                 (partition 2 clauses))]
+    (cons-tree (cons (flow-tree value) ifs))))
+
 (defn- closure-tree [form]
   [:Deep (seq-tree (rest form))])
 
@@ -488,8 +518,9 @@
   (merge (zipmap two-way-forms (repeat two-way-tree))
          (zipmap when-forms (repeat when-tree))
          (zipmap loop-forms (repeat nest-tree))
-         (zipmap cond-threading-forms (repeat nest-tree))
-         (zipmap '[cond condp case catch] (repeat nest-tree))
+         (zipmap cond-threading-forms (repeat threading-tree))
+         (zipmap '[condp case catch] (repeat nest-tree))
+         {'cond cond-tree}
          (zipmap logical-forms (repeat logical-tree))
          (zipmap '[fn fn* reify proxy] (repeat closure-tree))
          {'letfn letfn-tree}))
@@ -593,6 +624,19 @@
                     (and (seq? %) (= 'ns (first %))))
                (top-forms forms))))
 
+(defn- function-model
+  "What the metrics need of one definition."
+  [f]
+  (let [body (:body f)
+        tokens (reduce halstead* {:operators [] :operands []} body)]
+    (assoc (select-keys f [:name :kind :line :column :params :private])
+           :self-refs (get (symbol-counts [(:form f)]) (:name f) 0)
+           :lloc (reduce + 0 (map form-count body))
+           :decision-kinds (mapcat decision-kinds body)
+           :flow (seq-tree body)
+           :operators (:operators tokens)
+           :operands (:operands tokens))))
+
 (defn analyze-file
   "Parse source into the per-file model (no line-based LOC; see metrics.core)."
   [path source]
@@ -606,16 +650,6 @@
      :libspecs (vec (libspecs forms))
      :symbols (symbol-counts code)
      :qualifiers (qualifiers code)
-     :functions
-     (for [f (functions forms)
-           :let [body (:body f)
-                 tokens (reduce halstead* {:operators [] :operands []} body)]]
-       (assoc (select-keys f [:name :kind :line :column :params :private])
-              :self-refs (get (symbol-counts [(:form f)]) (:name f) 0)
-              :lloc (reduce + 0 (map form-count body))
-              :decision-kinds (mapcat decision-kinds body)
-              :flow (seq-tree body)
-              :operators (:operators tokens)
-              :operands (:operands tokens)))
+     :functions (map function-model (functions forms))
      :top-level-decision-kinds (mapcat decision-kinds top-code)
      :top-level-flow (seq-tree top-code)}))

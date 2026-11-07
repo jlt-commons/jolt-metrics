@@ -1,6 +1,6 @@
 (ns metrics.queue-test
   "The refactoring queue: what to fix first, where, and why."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [metrics.core :as core]
             [metrics.report :as report]))
@@ -54,24 +54,50 @@
   (let [e (entry (queue (deep "d" 6)) "d")]
     (is (some #(= :nesting (:rule %)) (:violations e)))))
 
-(deftest many-parameters-are-flagged
-  (let [e (entry (queue "(defn p [a b c d e f g h] [a b c d e f g h])") "p")]
-    (is (some #(= :params (:rule %)) (:violations e)))))
+(defn- band-of [q fname rule]
+  (:band (first (filter #(= rule (:rule %)) (:violations (entry q fname))))))
 
-(deftest long-functions-are-flagged
-  (let [body (apply str (repeat 60 "  (f x)\n"))
-        e (entry (queue (str "(defn long-one [x]\n" body ")")) "long-one")]
-    (is (some #(= :lines (:rule %)) (:violations e)))))
+(defn- with-params [n]
+  (let [ps (str/join " " (map #(str "p" %) (range n)))]
+    (str "(defn f [" ps "] [" ps "])")))
 
-(deftest a-critically-low-index-is-flagged
-  (let [e (entry (queue (branchy "huge" 120)) "huge")]
-    (is (some #(= :maintainability (:rule %)) (:violations e)))))
+(deftest parameter-limits-follow-the-sources
+  (testing "the Clojure style guide: three or four positional parameters"
+    (is (nil? (band-of (queue (with-params 4)) "f" :params)))
+    (is (= :warning (band-of (queue (with-params 5)) "f" :params))))
+  (testing "Checkstyle's default of seven"
+    (is (= :warning (band-of (queue (with-params 7)) "f" :params)))
+    (is (= :critical (band-of (queue (with-params 8)) "f" :params)))))
 
-(deftest a-middling-index-alone-queues-nothing
+(defn- with-lines
+  "A function of exactly n source lines."
+  [n]
+  (str "(defn f [x]\n" (apply str (repeat (- n 2) "  (g x)\n")) "  x)"))
+
+(deftest length-limits-follow-the-sources
+  (is (nil? (band-of (queue (with-lines 20)) "f" :lines)))
+  (is (= :warning (band-of (queue (with-lines 21)) "f" :lines)))
+  (testing "ESLint's default of fifty"
+    (is (= :warning (band-of (queue (with-lines 50)) "f" :lines)))
+    (is (= :critical (band-of (queue (with-lines 51)) "f" :lines)))))
+
+(deftest a-low-index-is-flagged
+  (let [mi-of (fn [src] (:maintainability-index-without-comments
+                         (first (:functions (core/analyze-source "a.clj" src)))))
+        src (branchy "huge" 80)]
+    (is (<= 10 (mi-of src) 38))
+    (is (= :warning (band-of (queue src) "huge" :maintainability)))))
+
+(deftest a-middling-index-queues-nothing
   (let [src "(defn f [a b c]\n  (let [x (+ a b)\n        y (* b c)\n        z (- x y)\n        w (/ z 2)\n        v (str x y z w)\n        u (vector x y z w v)\n        t (hash-map :x x :y y :z z)\n        s (assoc t :u u :v v :w w)]\n    (when (pos? a)\n      (merge s {:a a :b b :c c}))))"
         f (first (:functions (core/analyze-source "a.clj" src)))]
-    (is (< 40 (:maintainability-index-without-comments f) 60))
+    (is (< 38 (:maintainability-index-without-comments f) 60))
     (is (empty? (queue src)))))
+
+(deftest cond-clauses-cost-cognitive-complexity
+  (let [e (entry (queue (branchy "big" 25)) "big")]
+    (is (= 25 (get-in e [:metrics :cognitive])))
+    (is (= :warning (band-of (queue (branchy "big" 25)) "big" :cognitive)))))
 
 (deftest tests-are-not-queued
   (is (empty? (queue (str/replace (branchy "t" 25) "(defn t [x]" "(deftest t")))))

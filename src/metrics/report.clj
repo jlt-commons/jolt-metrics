@@ -202,7 +202,7 @@
          (row "Nesting depth" nesting)
          (row "Function source lines" lines)
          (row "Function parameters" params)
-         "| Maintainability index (comment-free) | - | <= 40 |\n"
+         "| Maintainability index (comment-free) | <= 38 | < 10 |\n"
          (row "File source lines" file-lines)
          (row "File dependencies" efferent)
          (str "| Hotspot risk | >= " (:warning queue/hotspot-limits)
