@@ -21,10 +21,20 @@
        (sort-by #(- (nth % 3)))
        (take n)))
 
+(defn render-errors
+  "The files the metrics do not cover, or nothing when every file was read."
+  [errors]
+  (when (seq errors)
+    (str "## Files not analyzed\n\n"
+         (apply str (for [{:keys [path error]} (sort-by :path errors)]
+                      (str "- `" path "`: " error "\n")))
+         "\n")))
+
 (defn render-summary [summary]
   (str "## Summary\n\n"
        "| Metric | Value |\n|---|---|\n"
        (str "| Files | " (:files summary) " |\n")
+       (str "| Files not analyzed | " (:unreadable summary) " |\n")
        (str "| Lines of code | " (:loc summary) " |\n")
        (str "| Source lines | " (:sloc summary) " |\n")
        (str "| Comment lines | " (:cloc summary) " |\n")
@@ -86,10 +96,11 @@
 
 (defn render
   "The full Markdown report for an analysis result."
-  [{:keys [files summary edges]}]
+  [{:keys [files summary edges errors]}]
   (str "# Code Metrics Report\n\n"
        (render-summary summary)
        "\n"
+       (render-errors errors)
        (render-files files)
        "\n"
        (render-top-offenders files)

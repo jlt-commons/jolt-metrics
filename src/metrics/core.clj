@@ -65,11 +65,19 @@
      :maintainability-index-without-comments (:maintainability-index-without-comments file-mi)
      :comment-weight (:comment-weight file-mi)}))
 
+(defn- average
+  "The mean of xs, or nil when there is nothing to average."
+  [xs]
+  (when (seq xs)
+    (/ (reduce + 0 xs) (count xs))))
+
 (defn summarize
-  "Project-level rollups over per-file metrics."
-  [files]
+  "Project-level rollups over per-file metrics; unreadable is how many files
+  could not be analyzed at all."
+  [files unreadable]
   (let [n (count files)]
     {:files n
+     :unreadable unreadable
      :loc (reduce + 0 (map (comp :loc :loc) files))
      :sloc (reduce + 0 (map (comp :sloc :loc) files))
      :cloc (reduce + 0 (map (comp :cloc :loc) files))
@@ -77,13 +85,21 @@
      :cyclomatic (reduce + 0 (map :cyclomatic files))
      :cognitive (reduce + 0 (map :cognitive files))
      :avg-cyclomatic (if (pos? n) (/ (reduce + 0 (map :cyclomatic files)) n) 0)
-     :avg-maintainability (if (pos? n) (/ (reduce + 0 (map :maintainability-index files)) n) 0)
+     :avg-maintainability (average (keep :maintainability-index files))
      :avg-instability (if (pos? n) (/ (reduce + 0 (map :instability files)) n) 0)}))
 
-(defn analyze-files
-  "Analyze a collection of [path source] pairs and resolve coupling between them."
-  [file-sources]
-  (let [files (mapv (fn [[p s]] (analyze-source p s)) file-sources)
+(defn- analyze-loaded
+  "Analyze [path load-source] pairs.  A file that cannot be loaded or read is
+  recorded under :errors and the rest of the project still gets a report."
+  [loaders]
+  (let [outcomes (mapv (fn [[p load-source]]
+                         (try
+                           {:file (analyze-source p (load-source))}
+                           (catch Throwable e
+                             {:error {:path p :error (or (ex-message e) (str e))}})))
+                       loaders)
+        errors (vec (keep :error outcomes))
+        files (vec (keep :file outcomes))
         ns->path (into {} (for [f files :when (:namespace f)] [(:namespace f) (:path f)]))
         edges (for [f files
                     imp (:imports f)
@@ -104,8 +120,14 @@
                                :instability-band (coupling/instability-band i))))
                     files)]
     {:files files
+     :errors errors
      :edges (vec edges)
-     :summary (summarize files)}))
+     :summary (summarize files (count errors))}))
+
+(defn analyze-files
+  "Analyze a collection of [path source] pairs and resolve coupling between them."
+  [file-sources]
+  (analyze-loaded (map (fn [[p s]] [p (constantly s)]) file-sources)))
 
 (def source-extensions #{"clj" "cljs" "cljc" "jolt"})
 
@@ -117,4 +139,4 @@
                     :when (contains? source-extensions ext)]
                 (str p))
         paths (concat paths (map str (fs/glob dir "**.jolt")))]
-    (analyze-files (for [p (distinct paths)] [p (slurp p)]))))
+    (analyze-loaded (for [p (distinct paths)] [p #(slurp p)]))))

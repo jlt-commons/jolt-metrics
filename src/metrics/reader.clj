@@ -16,15 +16,37 @@
 
 ;; --- reading -------------------------------------------------------------
 
-(defn read-forms
-  "Read every top-level form of source into a vector."
+(def ^:private scratch-ns
+  "The namespace source is read in, so that nothing resolves against the caller's."
+  'metrics.read-scratch)
+
+(defn- reading-ns
+  "The scratch namespace, with every alias source auto-resolves (`::a/kw`) bound
+  to a placeholder.  Metrics only compare keywords, so the real target does not
+  matter, and scanning the text also covers aliases made by a top-level
+  `require` or `alias`, not just the ns form."
   [source]
-  (with-in-str source
-    (loop [forms []]
-      (let [form (read {:eof ::eof} *in*)]
-        (if (= ::eof form)
-          forms
-          (recur (conj forms form)))))))
+  (let [n (create-ns scratch-ns)]
+    (binding [*ns* n]
+      (refer-clojure)
+      (doseq [a (distinct (map second (re-seq #"::([^\s/\"()\[\]{}]+)/" source)))]
+        (let [target (symbol (str "metrics.read-alias." a))]
+          (create-ns target)
+          (alias (symbol a) target))))
+    n))
+
+(defn read-forms
+  "Read every top-level form of source into a vector.  The source is untrusted
+  data: *read-eval* is off, so `#=` is a read error rather than code execution."
+  [source]
+  (binding [*read-eval* false
+            *ns* (reading-ns source)]
+    (with-in-str source
+      (loop [forms []]
+        (let [form (read {:eof ::eof} *in*)]
+          (if (= ::eof form)
+            forms
+            (recur (conj forms form))))))))
 
 ;; --- the decision table --------------------------------------------------
 
