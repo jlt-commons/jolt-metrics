@@ -183,3 +183,6 @@ jolt -M:test:dev
 
 Runs every writ spec and the reader behaviour tests. Specs are discovered by
 directory scan; add a `*_spec.clj` file and it is picked up.
+
+`self_test.clj` runs the report on `src` and fails if anything is queued, so a
+change that crosses a threshold has to refactor or argue the threshold down.
