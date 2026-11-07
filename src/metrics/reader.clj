@@ -59,7 +59,8 @@
 ;; --- the decision table --------------------------------------------------
 
 (def two-way-forms '#{if if-not if-let if-some})
-(def if-forms (into two-way-forms '#{when when-not when-let when-some when-first}))
+(def when-forms '#{when when-not when-let when-some when-first})
+(def if-forms (into two-way-forms when-forms))
 (def loop-forms '#{for doseq dotimes while loop})
 (def logical-forms '#{and or})
 (def cond-threading-forms '#{cond-> cond->>})
@@ -88,22 +89,26 @@
      :results (concat (map second pairs)
                       (when (odd? (count clauses)) [(last clauses)]))}))
 
+(defn- list-children
+  "The sub-forms of a list that are code; its head too, when that is computed."
+  [form]
+  (let [h (head-name form)
+        args (rest form)]
+    (cond
+      (contains? '#{quote comment} h) nil
+      (= 'case h) (let [{:keys [expr results]} (case-parts args)] (cons expr results))
+      (= 'catch h) (drop 2 args)
+      h args
+      (coll? (first form)) form
+      :else args)))
+
 (defn- code-children
   "The sub-forms of form that are code."
   [form]
   (cond
     (map? form) (mapcat identity form)
     (or (vector? form) (set? form)) (seq form)
-    (seq? form)
-    (let [h (head-name form)
-          args (rest form)]
-      (cond
-        (or (= 'quote h) (= 'comment h)) nil
-        (= 'case h) (let [{:keys [expr results]} (case-parts args)] (cons expr results))
-        (= 'catch h) (drop 2 args)
-        h args
-        (coll? (first form)) form
-        :else args))
+    (seq? form) (list-children form)
     :else nil))
 
 ;; --- syntax-quote, read back ---------------------------------------------
@@ -218,30 +223,73 @@
   (mapcat (fn [[types methods]] (method-units (last types) methods))
           (partition 2 (partition-by seq? forms))))
 
+(defn- private-name? [target]
+  (boolean (:private (meta target))))
+
+;; Each definer takes a definition form, the name it defines and the forms after
+;; that name, and returns the units it defines.
+
+(defn- defn-units [form target args]
+  [(assoc (unit (str target) :function form (split-arities args))
+          :private (or (= 'defn- (head-name form)) (private-name? target)))])
+
+(defn- defmacro-units [form target args]
+  [(unit (str target) :macro form (split-arities args))])
+
+(defn- def-units
+  "A def, defonce or defmulti is a unit only when its value is an fn."
+  [form target args]
+  (when-let [f (first (filter fn-form? args))]
+    [(assoc (unit (str target) :function form (fn-arities f))
+            :private (private-name? target))]))
+
+(defn- defmethod-units
+  "(defmethod m dispatch fn-name? ...), named for the method and its dispatch value."
+  [form target args]
+  (let [tail (rest args)
+        tail (if (symbol? (first tail)) (rest tail) tail)]
+    [(unit (str target " " (pr-str (first args))) :method form (split-arities tail))]))
+
+(defn- deftype-units
+  "defrecord or deftype: the methods after the fields."
+  [_ target args]
+  (method-units target (rest args)))
+
+(defn- extend-type-units [_ target args]
+  (method-units target args))
+
+(defn- extend-protocol-definer [_ _ args]
+  (extend-protocol-units args))
+
+(defn- deftest-units [form target args]
+  [(unit (str target) :test form [{:params [] :body args}])])
+
+(def ^:private definers
+  {'defn defn-units
+   'defn- defn-units
+   'defmacro defmacro-units
+   'def def-units
+   'defonce def-units
+   'defmulti def-units
+   'defmethod defmethod-units
+   'defrecord deftype-units
+   'deftype deftype-units
+   'extend-type extend-type-units
+   'extend-protocol extend-protocol-definer})
+
+(defn- definer-of
+  "The definer for a form, or nil.  deftest counts under any alias, since
+  clojure.test is usually required as one."
+  [form]
+  (or (get definers (head-name form))
+      (when (= "deftest" (name (first form))) deftest-units)))
+
 (defn- definition-units
   "The units a top-level form defines; empty when it defines none."
   [form]
   (when (and (seq? form) (symbol? (first form)))
-    (let [h (head-name form)
-          target (second form)
-          args (drop 2 form)]
-      (case h
-        (defn defn-) [(assoc (unit (str target) :function form (split-arities args))
-                             :private (or (= 'defn- h) (boolean (:private (meta target)))))]
-        defmacro [(unit (str target) :macro form (split-arities args))]
-        (def defonce defmulti)
-        (when-let [f (first (filter fn-form? args))]
-          [(assoc (unit (str target) :function form (fn-arities f))
-                  :private (boolean (:private (meta target))))])
-        defmethod (let [tail (rest args)
-                        tail (if (symbol? (first tail)) (rest tail) tail)]
-                    [(unit (str target " " (pr-str (first args))) :method form
-                           (split-arities tail))])
-        (defrecord deftype) (method-units target (rest args))
-        extend-type (method-units target args)
-        extend-protocol (extend-protocol-units args)
-        (when (= "deftest" (name (first form)))
-          [(unit (str target) :test form [{:params [] :body args}])])))))
+    (when-let [definer (definer-of form)]
+      (definer form (second form) (drop 2 form)))))
 
 (defn- top-forms
   "The top-level forms, with top-level do blocks opened."
@@ -406,39 +454,52 @@
   [forms]
   (cons-tree (map flow-tree forms)))
 
+(defn- two-way-tree [form]
+  (let [args (rest form)]
+    [:If (flow-tree (first args))
+         (flow-tree (second args))
+         (if (> (count args) 2) [:Else (flow-tree (nth args 2))] [:Leaf])]))
+
+(defn- when-tree
+  "A when has no else: everything after the test is its body."
+  [form]
+  (let [args (rest form)]
+    [:If (flow-tree (first args)) (seq-tree (rest args)) [:Leaf]]))
+
+(defn- nest-tree [form]
+  [:Nest (seq-tree (code-children form))])
+
+(defn- logical-tree
+  "One argument has no operator to read, so it adds nothing."
+  [form]
+  (let [args (rest form)]
+    (if (next args)
+      [:Flat (seq-tree args)]
+      (seq-tree args))))
+
+(defn- closure-tree [form]
+  [:Deep (seq-tree (rest form))])
+
+(defn- letfn-tree [form]
+  (let [args (rest form)]
+    [:Seq [:Deep (flow-tree (first args))] (seq-tree (rest args))]))
+
+(def ^:private tree-builders
+  (merge (zipmap two-way-forms (repeat two-way-tree))
+         (zipmap when-forms (repeat when-tree))
+         (zipmap loop-forms (repeat nest-tree))
+         (zipmap cond-threading-forms (repeat nest-tree))
+         (zipmap '[cond condp case catch] (repeat nest-tree))
+         (zipmap logical-forms (repeat logical-tree))
+         (zipmap '[fn fn* reify proxy] (repeat closure-tree))
+         {'letfn letfn-tree}))
+
 (defn flow-tree
   "The cognitive tree of form:
   [:Leaf] | [:Seq h t] | [:If t th e] | [:Else x] | [:Nest b] | [:Flat b] | [:Deep b]."
   [form]
-  (if (seq? form)
-    (let [h (head-name form)
-          args (rest form)]
-      (cond
-        (contains? two-way-forms h)
-        [:If (flow-tree (first args))
-             (flow-tree (second args))
-             (if (> (count args) 2) [:Else (flow-tree (nth args 2))] [:Leaf])]
-
-        (contains? if-forms h)
-        [:If (flow-tree (first args)) (seq-tree (rest args)) [:Leaf]]
-
-        (or (contains? loop-forms h)
-            (contains? '#{cond condp case catch} h)
-            (contains? cond-threading-forms h))
-        [:Nest (seq-tree (code-children form))]
-
-        (contains? logical-forms h)
-        (if (next args)
-          [:Flat (seq-tree args)]
-          (seq-tree args))
-
-        (contains? '#{fn fn* reify proxy} h)
-        [:Deep (seq-tree args)]
-
-        (= 'letfn h)
-        [:Seq [:Deep (flow-tree (first args))] (seq-tree (rest args))]
-
-        :else (seq-tree (code-children form))))
+  (if-let [build (when (seq? form) (get tree-builders (head-name form)))]
+    (build form)
     (seq-tree (code-children form))))
 
 ;; --- Halstead tokens -----------------------------------------------------

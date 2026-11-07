@@ -43,49 +43,77 @@
         j
         (recur (inc j))))))
 
-(defn- token-at
-  "The next token at i, as [kind end], where end is the index just past it."
+;; A token reader takes the text and a token's start, and returns [kind end], where
+;; end is the index just past the token.
+
+(defn- comment-token [s i]
+  [:comment (line-end s i)])
+
+(defn- string-token [s i]
+  [:string (string-end s i)])
+
+(defn- char-token
+  "A character literal: the backslash, whatever follows it, then the rest of a name
+  like \\newline.  So \\( and \\; open nothing."
   [s i]
-  (let [n (count s)
-        c (nth s i)
-        c2 (when (< (inc i) n) (nth s (inc i)))]
-    (cond
-      (= c \;) [:comment (line-end s i)]
-      (= c \") [:string (string-end s i)]
-      (= c \\) [:atom (atom-end s (min n (+ i 2)))]
-      (#{\( \[ \{} c) [:open (inc i)]
-      (#{\) \] \}} c) [:close (inc i)]
-      (= c \^) [:meta (inc i)]
-      (prefix? c) [:prefix (inc i)]
-      (and (= c \#) (= c2 \_)) [:discard (+ i 2)]
-      (and (= c \#) (= c2 \")) [:atom (string-end s (inc i))]
-      (and (= c \#) (= c2 \!)) [:comment (line-end s i)]
-      (and (= c \#) (= c2 \^)) [:meta (+ i 2)]
-      (= c \#) [:prefix (inc i)]
-      :else [:atom (max (inc i) (atom-end s i))])))
+  [:atom (atom-end s (min (count s) (+ i 2)))])
+
+(defn- atom-token [s i]
+  [:atom (max (inc i) (atom-end s i))])
+
+(defn- one-char [kind]
+  (fn [_ i] [kind (inc i)]))
+
+(def ^:private dispatch-readers
+  "What follows a #."
+  {\_ (fn [_ i] [:discard (+ i 2)])
+   \" (fn [s i] [:atom (string-end s (inc i))])
+   \! comment-token
+   \^ (fn [_ i] [:meta (+ i 2)])})
+
+(defn- dispatch-token [s i]
+  (let [following (when (< (inc i) (count s)) (nth s (inc i)))
+        reader (get dispatch-readers following (one-char :prefix))]
+    (reader s i)))
+
+(def ^:private token-readers
+  (merge (zipmap [\( \[ \{] (repeat (one-char :open)))
+         (zipmap [\) \] \}] (repeat (one-char :close)))
+         (zipmap prefix? (repeat (one-char :prefix)))
+         {\; comment-token
+          \" string-token
+          \\ char-token
+          \^ (one-char :meta)
+          \# dispatch-token}))
+
+(defn- token-at
+  "The token starting at i, with where it begins and where scanning goes next."
+  [s i line col]
+  (let [reader (get token-readers (nth s i) atom-token)
+        [kind end] (reader s i)
+        text (subs s i (min end (count s)))
+        breaks (count (filter #(= \newline %) text))]
+    {:kind kind
+     :text text
+     :line line
+     :col col
+     :end-line (+ line breaks)
+     :next end
+     :next-col (if (pos? breaks)
+                 (- (count text) (.lastIndexOf text "\n"))
+                 (+ col (count text)))}))
 
 (defn- tokens
   "The tokens of s, each {:kind :text :line :col :end-line}."
   [s]
   (let [n (count s)]
     (loop [i 0, line 1, col 1, out []]
-      (if (>= i n)
-        out
-        (let [c (nth s i)]
-          (cond
-            (= c \newline) (recur (inc i) (inc line) 1 out)
-            (whitespace? c) (recur (inc i) line (inc col) out)
-            :else
-            (let [[kind end] (token-at s i)
-                  text (subs s i (min end n))
-                  breaks (count (filter #(= \newline %) text))
-                  end-line (+ line breaks)
-                  next-col (if (pos? breaks)
-                             (- (count text) (.lastIndexOf text "\n"))
-                             (+ col (count text)))]
-              (recur end end-line next-col
-                     (conj out {:kind kind :text text :line line :col col
-                                :end-line end-line})))))))))
+      (cond
+        (>= i n) out
+        (= \newline (nth s i)) (recur (inc i) (inc line) 1 out)
+        (whitespace? (nth s i)) (recur (inc i) line (inc col) out)
+        :else (let [t (token-at s i line col)]
+                (recur (:next t) (:end-line t) (:next-col t) (conj out t)))))))
 
 ;; --- structure -----------------------------------------------------------
 

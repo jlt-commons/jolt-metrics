@@ -28,25 +28,32 @@ Prints the report, or writes it to out.
   (when (and text (re-matches #"\d+" text))
     (parse-long text)))
 
+(def ^:private default-options
+  {:format :md :days 90 :git true :top report/default-top :paths []})
+
+(def ^:private value-options
+  "Options that take a value: which key it sets, how to read it, and what to say
+  when it can't be read."
+  {"--format" {:key :format
+               :parse #(when (contains? #{"md" "edn"} %) (keyword %))
+               :error "--format takes md or edn"}
+   "--days" {:key :days :parse count-value :error "--days takes a number"}
+   "--top" {:key :top :parse count-value :error "--top takes a number"}})
+
 (defn- parse-args
   "Parse args into options, with :error set if they make no sense."
   [args]
   (loop [args args
-         opts {:format :md :days 90 :git true :top report/default-top :paths []}]
-    (let [[a b] args]
+         opts default-options]
+    (let [[a b] args
+          option (get value-options a)
+          value (when option ((:parse option) b))]
       (cond
         (empty? args) opts
         (contains? #{"-h" "--help"} a) (assoc opts :help true)
         (= "--no-git" a) (recur (rest args) (assoc opts :git false))
-        (= "--format" a) (if (contains? #{"md" "edn"} b)
-                           (recur (drop 2 args) (assoc opts :format (keyword b)))
-                           (assoc opts :error "--format takes md or edn"))
-        (= "--days" a) (if-let [n (count-value b)]
-                         (recur (drop 2 args) (assoc opts :days n))
-                         (assoc opts :error "--days takes a number"))
-        (= "--top" a) (if-let [n (count-value b)]
-                        (recur (drop 2 args) (assoc opts :top n))
-                        (assoc opts :error "--top takes a number"))
+        (some? value) (recur (drop 2 args) (assoc opts (:key option) value))
+        option (assoc opts :error (:error option))
         (str/starts-with? a "-") (assoc opts :error (str "unknown option: " a))
         :else (recur (rest args) (update opts :paths conj a))))))
 

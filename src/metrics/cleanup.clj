@@ -42,25 +42,33 @@
                           (<= (other-references symbols f) 0))]
            (function-entry file f)))))
 
+(defn- dead-alias
+  "The alias a libspec declares, if the file refers through neither it nor the lib."
+  [{:keys [qualifiers]} {:keys [lib as as-alias]}]
+  (let [local (or as as-alias)]
+    (when (and local
+               (not (contains? qualifiers (str local)))
+               (not (contains? qualifiers (str lib))))
+      (str local))))
+
+(defn- dead-refers
+  "The referred names the file never mentions, or nil.  :refer :all can't be judged."
+  [{:keys [symbols]} {:keys [refer only]}]
+  (let [named (or refer only)]
+    (when (sequential? named)
+      (not-empty (vec (distinct (map str (remove #(contains? symbols (str %)) named))))))))
+
 (defn- unused-in-libspec
-  "What a libspec declares but the file never uses, or nil.  A :rename or :refer
-  :all can't be judged, and a lib with no alias or refers is loaded for effect."
-  [file {:keys [lib as as-alias refer only rename]}]
-  (when-not rename
-    (let [{:keys [symbols qualifiers]} file
-          local (or as as-alias)
-          named (or refer only)
-          dead-alias (when (and local
-                                (not (contains? qualifiers (str local)))
-                                (not (contains? qualifiers (str lib))))
-                       (str local))
-          dead-refers (when (sequential? named)
-                        (seq (distinct (map str (remove #(contains? symbols (str %)) named)))))
-          entry (cond-> {:path (:path file) :lib (str lib)}
-                  dead-alias (assoc :alias dead-alias)
-                  dead-refers (assoc :refers (vec dead-refers)))]
-      (when (or dead-alias dead-refers)
-        entry))))
+  "What a libspec declares but the file never uses, or nil.  A :rename can't be
+  judged, and a lib with no alias or refers is loaded for effect."
+  [file spec]
+  (when-not (:rename spec)
+    (let [alias-name (dead-alias file spec)
+          refers (dead-refers file spec)]
+      (when (or alias-name refers)
+        (cond-> {:path (:path file) :lib (str (:lib spec))}
+          alias-name (assoc :alias alias-name)
+          refers (assoc :refers refers))))))
 
 (defn unused-requires
   "Aliases and referred names declared by a require that the file never uses."
