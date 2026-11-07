@@ -5,7 +5,6 @@
   A comment line is one whose first non-blank character is `;`; sloc is every
   other non-blank line."
   (:require [writ.spec :refer [spec ann law refine graph]]
-            [clojure.string :as str]
             [metrics.loc :as loc]))
 
 (spec metrics.loc {:require :proved})

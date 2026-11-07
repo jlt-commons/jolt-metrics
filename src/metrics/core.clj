@@ -11,6 +11,9 @@
             [metrics.halstead :as halstead]
             [metrics.maintainability :as maintainability]
             [metrics.coupling :as coupling]
+            [metrics.hotspot :as hotspot]
+            [metrics.queue :as queue]
+            [metrics.cleanup :as cleanup]
             [jolt.fs :as fs]
             [clojure.string :as str]))
 
@@ -58,6 +61,7 @@
      :lloc (:lloc f)
      :params (:params f)
      :private (boolean (:private f))
+     :self-refs (:self-refs f)
      :cyclomatic cc
      :cognitive (cognitive/complexity (:flow f))
      :nesting (cognitive/max-nesting (:flow f))
@@ -94,6 +98,9 @@
      :loc locs
      :lloc (reduce + 0 (map :lloc fns))
      :imports (mapv str (:imports model))
+     :libspecs (:libspecs model)
+     :symbols (:symbols model)
+     :qualifiers (:qualifiers model)
      :functions (mapv #(dissoc % :halstead) fns)
      :cyclomatic file-cc
      :cognitive (+ (cognitive/complexity (:top-level-flow model))
@@ -122,58 +129,104 @@
      :avg-maintainability (average (keep :maintainability-index-without-comments files))
      :avg-instability (average (keep :instability files))}))
 
-(defn- analyze-loaded
-  "Analyze [path load-source] pairs.  A file that cannot be loaded or read is
-  recorded under :errors and the rest of the project still gets a report."
+(defn- risk-fn
+  "A function giving a file's hotspot risk, or nil when it has too few changes to
+  say anything."
+  [files]
+  (let [max-changes (reduce max 0 (keep :changes files))
+        max-complexity (reduce max 0 (map :cyclomatic files))]
+    (fn [{:keys [changes cyclomatic]}]
+      (when (and changes (>= changes queue/min-hotspot-changes))
+        (hotspot/risk max-changes max-complexity changes cyclomatic)))))
+
+(defn- public-file
+  "A file's metrics without what only the cleanup and queue passes needed."
+  [file]
+  (-> file
+      (dissoc :symbols :qualifiers :libspecs)
+      (update :functions (fn [fns] (mapv #(dissoc % :self-refs) fns)))))
+
+(defn- load-all
+  "Analyze [path load-source] pairs into {:files :errors}.  A file that cannot be
+  loaded or read lands in :errors, and the rest of the project still gets a report."
   [loaders]
   (let [outcomes (mapv (fn [[p load-source]]
                          (try
                            {:file (analyze-source p (load-source))}
                            (catch Throwable e
                              {:error {:path p :error (or (ex-message e) (str e))}})))
-                       loaders)
-        errors (vec (keep :error outcomes))
-        files (vec (keep :file outcomes))
-        ns->paths (reduce (fn [m f] (update m (:namespace f) (fnil conj []) (:path f)))
+                       loaders)]
+    {:files (vec (keep :file outcomes))
+     :errors (vec (keep :error outcomes))}))
+
+(defn- dependency-edges
+  "[from to] paths for each import of a namespace in the project.  A namespace
+  defined by two files gets an edge to both."
+  [files]
+  (let [ns->paths (reduce (fn [m f] (update m (:namespace f) (fnil conj []) (:path f)))
                           {}
-                          (filter :namespace files))
-        edges (distinct
-               (for [f files
-                     imp (:imports f)
-                     target (get ns->paths imp)
-                     :when (not= target (:path f))]
-                 [(:path f) target]))
+                          (filter :namespace files))]
+    (distinct
+     (for [f files
+           imp (:imports f)
+           target (get ns->paths imp)
+           :when (not= target (:path f))]
+       [(:path f) target]))))
+
+(defn- assoc-coupling
+  "Add a file's coupling, given every edge's efferent and afferent maps.  A file
+  with no coupling at all is :isolated, which says more than a stable 0 would."
+  [f eff aff]
+  (let [p (:path f)
+        ce (count (get eff p #{}))
+        ca (count (get aff p #{}))
+        i (when (pos? (+ ce ca)) (coupling/instability ce ca))]
+    (assoc f
+           :efferent-coupling ce
+           :afferent-coupling ca
+           :instability i
+           :instability-band (if i (coupling/instability-band i) :isolated))))
+
+(defn- analyze-loaded
+  "The whole result for [path load-source] pairs.  With :changes, a map of path to
+  commit count over the last :days days, it also has churn: hotspots, and a queue
+  that puts them first."
+  [loaders {:keys [changes days]}]
+  (let [{:keys [files errors]} (load-all loaders)
+        edges (dependency-edges files)
         eff (coupling/efferent edges)
         aff (coupling/afferent edges)
-        files (mapv (fn [f]
-                      (let [p (:path f)
-                            ce (count (get eff p #{}))
-                            ca (count (get aff p #{}))
-                            i (when (pos? (+ ce ca)) (coupling/instability ce ca))]
-                        (assoc f
-                               :efferent-coupling ce
-                               :afferent-coupling ca
-                               :instability i
-                               :instability-band (if i (coupling/instability-band i) :isolated))))
-                    files)]
-    {:files files
+        files (mapv #(assoc (assoc-coupling % eff aff)
+                            :changes (when changes (get changes (:path %) 0)))
+                    files)
+        risk-of (risk-fn files)
+        result-files (mapv public-file files)]
+    {:files result-files
      :errors errors
      :edges (vec edges)
-     :summary (summarize files (count errors))}))
+     :summary (summarize result-files (count errors))
+     :changes changes
+     :days (when changes days)
+     :hotspots (queue/hotspots files risk-of)
+     :queue (queue/build files risk-of)
+     :cleanup (cleanup/candidates-of files)}))
 
 (defn analyze-files
   "Analyze a collection of [path source] pairs and resolve coupling between them."
-  [file-sources]
-  (analyze-loaded (map (fn [[p s]] [p (constantly s)]) file-sources)))
+  ([file-sources] (analyze-files file-sources nil))
+  ([file-sources opts]
+   (analyze-loaded (map (fn [[p s]] [p (constantly s)]) file-sources) opts)))
 
 (def source-extensions #{"clj" "cljs" "cljc" "jolt"})
 
 (defn analyze-dir
-  "Analyze every Clojure/Jolt source file under a directory."
-  [dir]
-  (let [paths (for [p (fs/glob dir "**.clj*")
-                    :let [ext (str/lower-case (or (fs/extension p) ""))]
-                    :when (contains? source-extensions ext)]
-                (str p))
-        paths (concat paths (map str (fs/glob dir "**.jolt")))]
-    (analyze-loaded (for [p (distinct paths)] [p #(slurp p)]))))
+  "Analyze every Clojure/Jolt source file under a directory; opts as for
+  analyze-files."
+  ([dir] (analyze-dir dir nil))
+  ([dir opts]
+   (let [paths (for [p (fs/glob dir "**.clj*")
+                     :let [ext (str/lower-case (or (fs/extension p) ""))]
+                     :when (contains? source-extensions ext)]
+                 (str p))
+         paths (concat paths (map str (fs/glob dir "**.jolt")))]
+     (analyze-loaded (for [p (distinct paths)] [p #(slurp p)]) opts))))

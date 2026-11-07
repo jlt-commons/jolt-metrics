@@ -4,7 +4,7 @@
   MIwoc = 171 - 5.2*ln(V) - 0.23*G - 16.2*ln(lloc), scaled to 0..100 and
   clamped at 0; the comment term MIcw = 50*sin(sqrt(2.4*cloc/loc)); the index is
   their sum.  Undefined (nil) when V <= 0 or lloc <= 0."
-  (:require [writ.spec :refer [spec ann law example data refine graph assume]]
+  (:require [writ.spec :refer [spec ann law refine graph assume]]
             [clojure.math :as math]
             [metrics.maintainability :as mi]))
 

@@ -24,8 +24,12 @@
   "The namespace source is read in, so that nothing resolves against the caller's."
   'metrics.read-scratch)
 
+(def ^:private alias-placeholder
+  "What an auto-resolved alias a resolves to is this followed by a."
+  "metrics.read-alias.")
+
 (defn- reading-ns
-  "The scratch namespace, with every alias source auto-resolves (`::a/kw`) bound
+  "The scratch namespace, with every alias source auto-resolves (`::a/kw`, `#::a{}`) bound
   to a placeholder.  Metrics only compare keywords, so the real target does not
   matter, and scanning the text also covers aliases made by a top-level
   `require` or `alias`, not just the ns form."
@@ -33,8 +37,8 @@
   (let [n (create-ns scratch-ns)]
     (binding [*ns* n]
       (refer-clojure)
-      (doseq [a (distinct (map second (re-seq #"::([^\s/\"()\[\]{}]+)/" source)))]
-        (let [target (symbol (str "metrics.read-alias." a))]
+      (doseq [a (distinct (map second (re-seq #"::([^\s/\"()\[\]{}]+)[/{]" source)))]
+        (let [target (symbol (str alias-placeholder a))]
           (create-ns target)
           (alias (symbol a) target))))
     n))
@@ -189,6 +193,7 @@
    :kind kind
    :line (:line (meta form) 0)
    :column (:column (meta form) 0)
+   :form form
    :params (reduce max 0 (map (comp param-count :params) arities))
    :body (vec (mapcat :body arities))})
 
@@ -488,6 +493,35 @@
     (seq? form) (inc (reduce + 0 (map form-count (code-children form))))
     :else (reduce + 0 (map form-count (code-children form)))))
 
+;; --- what a file mentions -------------------------------------------------
+
+(defn- atoms [form]
+  (remove coll? (tree-seq coll? seq form)))
+
+(defn- symbol-counts
+  "How many times each symbol name occurs in forms, whatever its namespace."
+  [forms]
+  (frequencies (map name (filter symbol? (mapcat atoms forms)))))
+
+(defn- alias-qualifier
+  "The alias a placeholder namespace stands for, or nil if it is not one."
+  [ns-name]
+  (when (and ns-name (.startsWith ns-name alias-placeholder))
+    (subs ns-name (count alias-placeholder))))
+
+(defn- qualifiers
+  "The namespaces and aliases forms refer through: symbol qualifiers as written,
+  and auto-resolved aliases, which read to a placeholder.  A keyword with a plain
+  :x/y namespace has nothing to do with an alias x."
+  [forms]
+  (set
+   (keep (fn [a]
+           (cond
+             (symbol? a) (or (alias-qualifier (namespace a)) (namespace a))
+             (keyword? a) (alias-qualifier (namespace a))
+             :else nil))
+         (mapcat atoms forms))))
+
 ;; --- the whole file ------------------------------------------------------
 
 (defn- top-level-code
@@ -502,16 +536,21 @@
   "Parse source into the per-file model (no line-based LOC; see metrics.core)."
   [path source]
   (let [forms (read-forms source)
-        top-code (top-level-code forms)]
+        top-code (top-level-code forms)
+        code (remove #(and (seq? %) (= 'ns (first %))) forms)]
     {:path path
      :language :clojure
      :namespace (namespace-name forms)
      :imports (imports forms)
+     :libspecs (vec (libspecs forms))
+     :symbols (symbol-counts code)
+     :qualifiers (qualifiers code)
      :functions
      (for [f (functions forms)
            :let [body (:body f)
                  tokens (reduce halstead* {:operators [] :operands []} body)]]
        (assoc (select-keys f [:name :kind :line :column :params :private])
+              :self-refs (get (symbol-counts [(:form f)]) (:name f) 0)
               :lloc (reduce + 0 (map form-count body))
               :decision-kinds (mapcat decision-kinds body)
               :flow (seq-tree body)

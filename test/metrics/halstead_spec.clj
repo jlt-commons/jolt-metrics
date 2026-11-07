@@ -5,7 +5,7 @@
   operators and operands, N1 and N2 the total occurrences; from these the
   standard Halstead volume, difficulty, effort, time and estimated-bug count
   follow."
-  (:require [writ.spec :refer [spec ann law example data refine graph assume]]
+  (:require [writ.spec :refer [spec ann law refine graph assume]]
             [clojure.math :as math]
             [metrics.halstead :as h]))
 

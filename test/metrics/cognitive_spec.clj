@@ -6,7 +6,7 @@
   :Nest (body), :Flat (body) or :Deep (body).  :If and :Nest add 1 plus their
   nesting depth; an else-if adds a flat 1; :Flat adds a flat 1; :Deep adds nothing
   but raises the depth of what it holds."
-  (:require [writ.spec :refer [spec data ann law refine graph]]
+  (:require [writ.spec :refer [spec data ann law graph]]
             [metrics.cognitive :as cog]))
 
 (spec metrics.cognitive {:require :proved})
