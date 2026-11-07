@@ -70,3 +70,40 @@
                       (contains? directories %)
                       (glob-match? % path))
                    patterns))))
+
+(defn- collapse
+  "A path with . and .. worked out; a .. with nothing to undo is kept."
+  [path]
+  (str/join
+   "/"
+   (reduce (fn [parts segment]
+             (cond
+               (= "." segment) parts
+               (and (= ".." segment) (seq parts) (not= ".." (peek parts))) (pop parts)
+               :else (conj parts segment)))
+           []
+           (str/split path #"/"))))
+
+(defn- sibling
+  "target as seen from the directory holding from."
+  [from target]
+  (let [parts (butlast (str/split from #"/"))]
+    (collapse (str/join "/" (concat parts [target])))))
+
+(defn- unique-suffix
+  "The one known path ending in target as whole path segments, or nil if there are
+  none or several, which would make any answer a guess."
+  [known target]
+  (let [suffix (str "/" target)
+        matches (filter #(or (= % target) (str/ends-with? % suffix)) known)]
+    (when (= 1 (count matches))
+      (first matches))))
+
+(defn resolve-file
+  "Which of the known paths a file at from means by target: next to it, from the
+  root, or the only path ending that way.  nil if it can't be told."
+  [known from target root]
+  (let [cleaned (collapse target)]
+    (or (known (sibling from target))
+        (known (collapse (prefixed root cleaned)))
+        (unique-suffix known cleaned))))

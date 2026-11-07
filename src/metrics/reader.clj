@@ -653,7 +653,7 @@
   (let [top-code (top-level-code forms)
         code (remove #(and (seq? %) (= 'ns (first %))) forms)]
     (merge
-     (select-keys deps [:namespace :imports :libspecs])
+     (select-keys deps [:namespace :imports :libspecs :load-paths])
      {:path path
       :symbols (symbol-counts code)
       :qualifiers (qualifiers code)

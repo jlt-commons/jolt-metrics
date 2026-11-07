@@ -45,3 +45,19 @@
   (is (not (paths/test-file? ["test" "tests"] "src/testing/a.clj")))
   (is (not (paths/test-file? ["test" "tests"] "src/test.clj")) "a file name is not a directory")
   (is (paths/test-file? ["bench/*"] "bench/a.ss") "or a glob"))
+
+(deftest resolving-a-loaded-path
+  (let [known #{"host/a.ss" "host/b.ss" "other/b.ss" "x/lib/rt.ss" "y/lib/rt.ss" "/abs/p/q.ss"}
+        resolve-from (fn [from target root] (paths/resolve-file known from target root))]
+    (testing "next to the file comes first"
+      (is (= "host/b.ss" (resolve-from "host/a.ss" "b.ss" nil))))
+    (testing "then from the root"
+      (is (= "other/b.ss" (resolve-from "host/a.ss" "other/b.ss" nil))))
+    (testing "parent and current directories"
+      (is (= "other/b.ss" (resolve-from "host/a.ss" "../other/b.ss" nil)))
+      (is (= "host/b.ss" (resolve-from "host/a.ss" "./b.ss" nil))))
+    (testing "then by a unique suffix"
+      (is (= "/abs/p/q.ss" (resolve-from "host/a.ss" "p/q.ss" nil))))
+    (testing "an ambiguous suffix or no match resolves to nothing"
+      (is (nil? (resolve-from "host/a.ss" "lib/rt.ss" nil)))
+      (is (nil? (resolve-from "host/a.ss" "none.ss" nil))))))

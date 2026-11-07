@@ -3,8 +3,8 @@ name: jolt-metrics
 description: >-
   Use when working in the jolt-metrics library: a Jolt code-metrics library
   that computes LOC, cyclomatic and cognitive complexity, Halstead metrics,
-  the maintainability index, and architecture coupling over Clojure/Jolt
-  source, and renders a report led by a ranked refactoring queue. Covers adding
+  the maintainability index, and architecture coupling over Clojure/Jolt and
+  Scheme source, and renders a report led by a ranked refactoring queue. Covers adding
   or changing a metric (write its writ spec first, then the pure implementation),
   the normalized model, the reader and scanner, and the coupling, queue and
   report pipeline.
@@ -12,7 +12,7 @@ description: >-
 
 # jolt-metrics
 
-A code metrics library for Clojure/Jolt source, written in Jolt. Every metric's
+A code metrics library for Clojure/Jolt and Scheme source, written in Jolt. Every metric's
 computation is checked against a writ spec, not just unit tests.
 
 ## Layering
@@ -32,14 +32,30 @@ source ──► normalized model ──► pure metric visitors ──► queue
   `clojure.core/read` and maps them to the normalized model. Every walker goes
   through `code-children`, so the metrics can't disagree about what is code.
 - **`metrics.scanner`** is plain Clojure too: a lexer over the raw text, total on
-  any input, for docstrings, discards and where each list ends.
+  any input, for docstrings, discards and where each list ends. A syntax map says
+  what the tokens are.
 - **`metrics.*`** metric namespaces are pure and writ-constrained: single-arity
   fns, no interop, recursion only via `case`-destructured fields of a `data`
   type (or `rest`/`dec` under a test). They never mention writ and never do I/O.
 - **`metrics.core`** orchestrates parse → per-file → coupling → queue → summary.
+- **`metrics.paths`** handles globs and resolving loaded files; **`metrics.config`**
+  reads `.jolt-metrics.edn`.
 - **`metrics.queue`** holds the thresholds and ranks the findings; **`metrics.cleanup`**
   finds what looks unused; **`metrics.git`** reads churn and is the only shell-out.
 - **`metrics.report`** renders Markdown; **`metrics.cli`** is the entry point.
+
+**Languages stay separate.** The pipeline only sees an adapter from
+`metrics.language`: `:parse` (text to forms in the walker's shapes, plus dependencies)
+and `:scan`. Nothing outside `src/metrics/scheme*` may know Scheme exists, apart from
+the one line listing its adapter. A Scheme fix belongs in `metrics.scheme.normalize`,
+not in the walker: to count a Scheme form differently, change what it normalizes to.
+
+- A raw head the walker would take for a Clojure form must stay in `clojure-heads`
+  in `metrics.scheme.normalize`. Adding a form to the walker's tables means adding it
+  there too, or Scheme calls of that name change meaning.
+- `exprs` is eager on purpose: a malformed form has to fail inside the `expr` that
+  can read it as a call instead.
+- Pin Scheme with hand-scored numbers in `scheme_normalize_test.clj`.
 
 Reading is safe by construction: `read-forms` binds `*read-eval*` to false and reads
 in a scratch namespace. Keep it that way, since the source is untrusted data.
@@ -84,8 +100,8 @@ are switches: see the `tree-builders` in `metrics.reader`.
 ## Commands
 
 - `jolt -M:test:dev` — run all writ specs + reader tests.
-- `jolt -m metrics.cli <dir> [out] [--format md|edn] [--top N] [--days N] [--no-git]`
-  — the report.
+- `jolt -m metrics.cli <dir> [out] [--format md|edn] [--top N] [--days N] [--no-git]
+  [--exclude GLOB] [--config FILE]` — the report.
 
 Note: running `jolt -M:test:dev` relies on `:main-opts` in `deps.edn`; do not
 also pass `-m metrics.runner` on the CLI, or it leaks into the runner's args.

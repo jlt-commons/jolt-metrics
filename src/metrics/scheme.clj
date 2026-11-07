@@ -1,14 +1,15 @@
 (ns metrics.scheme
   "The Scheme language adapter: everything the shared pipeline needs to analyze
   Scheme, for Chez and Gambit.  See metrics.language for what an adapter is."
-  (:require [metrics.scheme.normalize :as normalize]
+  (:require [metrics.scheme.deps :as deps]
+            [metrics.scheme.normalize :as normalize]
             [metrics.scheme.reader :as reader]
             [metrics.scheme.scanner :as scanner]))
 
 (defn- parse [source]
   (let [forms (reader/read-forms source)]
     {:forms (normalize/normalize forms)
-     :dependencies {:namespace nil :imports [] :libspecs []}}))
+     :dependencies (deps/dependencies forms)}))
 
 (def language
   ;; a Scheme runtime's names are reached from emitted code and strings, so a name

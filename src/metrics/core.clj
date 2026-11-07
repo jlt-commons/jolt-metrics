@@ -114,7 +114,7 @@
   "What a file is, apart from its scores."
   [path lang model]
   (merge
-   (select-keys model [:libspecs :symbols :qualifiers])
+   (select-keys model [:libspecs :symbols :qualifiers :load-paths])
    {:path path
     :namespace (some-> (:namespace model) str)
     :language (:id lang)
@@ -187,7 +187,7 @@
   "A file's metrics without what only the cleanup and queue passes needed."
   [file]
   (-> file
-      (dissoc :symbols :qualifiers :libspecs :unused-public?)
+      (dissoc :symbols :qualifiers :libspecs :unused-public? :load-paths)
       (update :functions (fn [fns] (mapv #(dissoc % :self-refs) fns)))))
 
 (defn- load-all
@@ -203,17 +203,29 @@
     {:files (vec (keep :file outcomes))
      :errors (vec (keep :error outcomes))}))
 
-(defn- dependency-edges
-  "[from to] paths for each import of a namespace in the project.  A namespace
-  defined by two files gets an edge to both."
+(defn- namespace-targets
+  "The project files a file imports by namespace.  A namespace defined by two files
+  gets an edge to both."
   [files]
   (let [ns->paths (reduce (fn [m f] (update m (:namespace f) (fnil conj []) (:path f)))
                           {}
                           (filter :namespace files))]
+    (fn [f] (mapcat ns->paths (:imports f)))))
+
+(defn- load-targets
+  "The project files a file loads by path."
+  [files root]
+  (let [known (set (map :path files))]
+    (fn [f] (keep #(paths/resolve-file known (:path f) % root) (:load-paths f)))))
+
+(defn- dependency-edges
+  "[from to] paths for what each file imports or loads from the project."
+  [files root]
+  (let [imported (namespace-targets files)
+        loaded (load-targets files root)]
     (distinct
      (for [f files
-           imp (:imports f)
-           target (get ns->paths imp)
+           target (concat (imported f) (loaded f))
            :when (not= target (:path f))]
        [(:path f) target]))))
 
@@ -246,7 +258,7 @@
   that puts them first."
   [loaders {:keys [changes days root test-paths]}]
   (let [{:keys [files errors]} (load-all loaders)
-        edges (dependency-edges files)
+        edges (dependency-edges files root)
         files (annotated-files files edges changes #(mark-test-file % root test-paths))
         risk-of (risk-fn files)
         result-files (mapv public-file files)]
