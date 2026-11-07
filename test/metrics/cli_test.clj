@@ -90,6 +90,20 @@
         data (read-string (:out (cli/run [dir "--format" "edn" "--no-git"])))]
     (is (empty? (:queue data)))))
 
+(deftest a-config-can-name-api-namespaces
+  (let [dir (temp-project [["src/lib.clj" "(ns my.lib) (defn api [] 1)"]
+                           ["src/app.clj" "(ns my.app) (defn dead [] 1)"]
+                           [".jolt-metrics.edn" "{:api-namespaces [\"my.lib\"]}"]])
+        data (read-string (:out (cli/run [dir "--format" "edn" "--no-git"])))]
+    (is (= ["dead"] (map :name (get-in data [:cleanup :unused-public]))))))
+
+(deftest a-config-can-name-api-paths
+  (let [dir (temp-project [["core/a.clj" "(defn api [] 1)"]
+                           ["src/app.clj" "(ns my.app) (defn dead [] 1)"]
+                           [".jolt-metrics.edn" "{:api-paths [\"core\"]}"]])
+        data (read-string (:out (cli/run [dir "--format" "edn" "--no-git"])))]
+    (is (= ["dead"] (map :name (get-in data [:cleanup :unused-public]))))))
+
 (deftest a-config-can-be-named
   (let [dir (temp-project [["a.clj" "(ns a)"] ["b.clj" "(ns b)"]])
         config (str (fs/create-temp-dir) "/mine.edn")]
@@ -99,10 +113,12 @@
 (deftest a-bad-config-is-an-error
   (let [broken (temp-project [["a.clj" "(ns a)"] [".jolt-metrics.edn" "{:exclude ["]])
         wrong (temp-project [["a.clj" "(ns a)"] [".jolt-metrics.edn" "[1 2]"]])
-        unknown (temp-project [["a.clj" "(ns a)"] [".jolt-metrics.edn" "{:exlude []}"]])]
+        unknown (temp-project [["a.clj" "(ns a)"] [".jolt-metrics.edn" "{:exlude []}"]])
+        not-a-list (temp-project [["a.clj" "(ns a)"] [".jolt-metrics.edn" "{:api-namespaces \"a.*\"}"]])]
     (is (= 2 (:exit (cli/run [broken]))))
     (is (= 2 (:exit (cli/run [wrong]))))
     (is (str/includes? (:err (cli/run [unknown])) ":exlude"))
+    (is (= 2 (:exit (cli/run [not-a-list]))))
     (is (= 2 (:exit (cli/run ["src" "--config" "/nonexistent/x.edn"]))))))
 
 (deftest a-config-cannot-run-code

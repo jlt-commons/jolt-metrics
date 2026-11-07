@@ -180,6 +180,36 @@
   (let [{:keys [unused-public]} (cleanup "a.clj" "(ns a) (defn -main [] 1) (defmethod m :a [x] 1) (deftest t 1) (defrecord R [] P (n [_] 1))")]
     (is (empty? unused-public))))
 
+(deftest api-namespaces-are-not-unused
+  (let [src [["a.clj" "(ns lib.core) (defn api [] 1) (defn- gone [] 2)"]
+             ["b.clj" "(ns lib.impl.x) (defn deep-api [] 1)"]
+             ["c.clj" "(ns app) (defn dead [] 1)"]]
+        cleanup-with #(:cleanup (core/analyze-files src {:api-namespaces %}))
+        public #(set (map :name (:unused-public (cleanup-with %))))]
+    (is (= #{"api" "deep-api" "dead"} (public nil)))
+    (is (= #{"deep-api" "dead"} (public ["lib.core"])))
+    (is (= #{"dead"} (public ["lib.*"])) "a * crosses dots")
+    (is (= #{"api" "deep-api" "dead"} (public ["lib"])) "a plain name is that namespace only")
+    (is (= ["gone"] (map :name (:unused-private (cleanup-with ["lib.*"])))) "private functions are not API")))
+
+(deftest api-paths-cover-files-without-a-namespace
+  (let [src [["/p/core/a.clj" "(defn api [] 1)"] ["/p/src/b.clj" "(defn dead [] 1)"]]
+        public #(set (map :name (:unused-public (:cleanup (core/analyze-files src %)))))]
+    (is (= #{"api" "dead"} (public {:root "/p"})))
+    (is (= #{"dead"} (public {:root "/p" :api-paths ["core"]})))
+    (is (= #{"dead"} (public {:root "/p" :api-paths ["core/*.clj"]})))))
+
+(deftest helpers-are-not-cleanup-candidates
+  (let [{:keys [unused-private unused-public]}
+        (cleanup "a.clj" "(ns a) (defn- f [] (letfn [(g [] 1)] (g))) (defn h [] (f))")]
+    (is (empty? unused-private))
+    (is (= ["h"] (map :name unused-public)))))
+
+(deftest a-helper-is-queued-under-its-own-name
+  (let [helper (str/replace (branchy "g" 25) "(defn g [x]" "(g [x]")
+        q (queue (str "(defn f [y]\n  (letfn [" helper "]\n    (g y)))\n"))]
+    (is (= [["f/g" :helper]] (map (juxt :name :kind) q)))))
+
 (deftest unused-requires
   (let [{:keys [unused-requires]}
         (cleanup "a.clj" "(ns a (:require [b.used :as u] [b.dead :as d] [b.load] [b.refd :refer [x y]] [b.all :refer :all]))

@@ -2,7 +2,9 @@
   "The optional project config file, .jolt-metrics.edn in the analyzed directory:
 
     {:exclude [\"vendor/**\" \"**/generated/*\"]
-     :test-paths [\"test\" \"bench\"]}
+     :test-paths [\"test\" \"bench\"]
+     :api-namespaces [\"my.lib\" \"my.lib.api.*\"]
+     :api-paths [\"src/my/lib/core\"]}
 
   Patterns are relative to that directory.  It is data, read as EDN, so it can't run
   anything."
@@ -11,7 +13,7 @@
 
 (def file-name ".jolt-metrics.edn")
 
-(def ^:private known-keys #{:exclude :test-paths})
+(def ^:private known-keys #{:exclude :test-paths :api-namespaces :api-paths})
 
 (defn- problem
   "What is wrong with a parsed config, or nil."

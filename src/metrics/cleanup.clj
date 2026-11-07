@@ -4,7 +4,10 @@
   Reference counting goes by name and is deliberately conservative: any symbol of
   that name anywhere counts as a use, so a candidate really has no mention in the
   analyzed files.  It can't see lookups built at runtime or callers outside them,
-  so a public function listed here may still be API.")
+  so a public function listed here may still be API; a project names its API
+  namespaces to keep them off the list."
+  (:require [metrics.paths :as paths]
+            [clojure.string :as str]))
 
 (defn- other-references
   "How many mentions of f's name lie outside its own definition."
@@ -32,16 +35,38 @@
              :when (<= (other-references (:symbols file) f) 0)]
          (function-entry file f))))
 
+(defn- namespace-pattern
+  "A namespace name or glob as a regex: * stands for any run of characters, dots
+  included, so a.* covers a.b and a.b.c but not a itself."
+  [glob]
+  (re-pattern (str/join ".*" (map #(str/replace % #"[\\.+?()\[\]{}^$|]" (fn [m] (str "\\" m)))
+                                  (str/split glob #"\*" -1)))))
+
+(defn- api-namespace?
+  "Does a namespace name match one of the names or globs?"
+  [globs ns-name]
+  (boolean (and ns-name (some #(re-matches (namespace-pattern %) ns-name) globs))))
+
+(defn- api-file?
+  "Is a file public API: its namespace among :api-namespaces, or its path, relative
+  to :root, among :api-paths?  A file with no ns form has only its path to go by."
+  [{:keys [root api-namespaces api-paths]} file]
+  (or (api-namespace? api-namespaces (:namespace file))
+      (paths/excluded? api-paths (paths/relative root (:path file)))))
+
 (defn unused-public
   "Public functions nothing else in the analyzed files mentions, in languages where
-  that means something.  Every file's mentions count, whatever its language."
-  [files]
-  (let [symbols (apply merge-with + {} (map :symbols files))]
-    (vec (for [file (filter :unused-public? files)
-               f (candidates file false)
-               :when (and (not (entry-point? f))
-                          (<= (other-references symbols f) 0))]
-           (function-entry file f)))))
+  that means something.  Every file's mentions count, whatever its language.  A
+  file that opts call API (see api-file?) is called from outside, so it has none."
+  ([files] (unused-public files nil))
+  ([files opts]
+   (let [symbols (apply merge-with + {} (map :symbols files))]
+     (vec (for [file (filter :unused-public? files)
+                :when (not (api-file? opts file))
+                f (candidates file false)
+                :when (and (not (entry-point? f))
+                           (<= (other-references symbols f) 0))]
+            (function-entry file f))))))
 
 (defn- dead-alias
   "The alias a libspec declares, if the file refers through neither it nor the lib."
@@ -81,8 +106,9 @@
          e)))
 
 (defn candidates-of
-  "Every cleanup candidate of analyzed files."
-  [files]
-  {:unused-requires (unused-requires files)
-   :unused-private (unused-private files)
-   :unused-public (unused-public files)})
+  "Every cleanup candidate of analyzed files; opts as for unused-public."
+  ([files] (candidates-of files nil))
+  ([files opts]
+   {:unused-requires (unused-requires files)
+    :unused-private (unused-private files)
+    :unused-public (unused-public files opts)}))

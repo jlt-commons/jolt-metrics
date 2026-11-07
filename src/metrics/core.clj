@@ -36,13 +36,25 @@
                          hs)]
         (into {} (map (fn [[k v]] [k (/ v n)]) sums))))))
 
+(defn- helper-lines
+  "The lines a definition's named helpers span, which are theirs and not its own.
+  Its first line stays its own, whatever else is on it."
+  [{:keys [line helpers]} extents]
+  (set (for [[l c] helpers
+             n (range l (inc (get extents [l c] l)))
+             :when (> n line)]
+         n)))
+
 (defn- unit-lines
-  "A definition's end line and the classes of the lines it spans."
-  [{:keys [line column]} {:keys [classes extents]}]
+  "A definition's end line and the classes of the lines it spans, leaving out
+  those of its named helpers."
+  [{:keys [line column] :as f} {:keys [classes extents]}]
   (let [end-line (get extents [line column] line)
-        start (min (max 0 (dec line)) (count classes))]
+        theirs (helper-lines f extents)]
     {:end-line end-line
-     :locs (loc/tally (subvec classes start (max start (min end-line (count classes)))))}))
+     :locs (loc/tally (for [n (range (max 1 line) (inc (min end-line (count classes))))
+                            :when (not (contains? theirs n))]
+                        (nth classes (dec n))))}))
 
 (defn- index-fields
   "The index's terms as result fields, all nil when the index is undefined."
@@ -256,7 +268,7 @@
   "The whole result for [path load-source] pairs.  With :changes, a map of path to
   commit count over the last :days days, it also has churn: hotspots, and a queue
   that puts them first."
-  [loaders {:keys [changes days root test-paths]}]
+  [loaders {:keys [changes days root test-paths] :as opts}]
   (let [{:keys [files errors]} (load-all loaders)
         edges (dependency-edges files root)
         files (annotated-files files edges changes #(mark-test-file % root test-paths))
@@ -270,12 +282,13 @@
      :days (when changes days)
      :hotspots (queue/hotspots files risk-of)
      :queue (queue/build files risk-of)
-     :cleanup (cleanup/candidates-of files)}))
+     :cleanup (cleanup/candidates-of files (select-keys opts [:root :api-namespaces :api-paths]))}))
 
 (defn analyze-files
   "Analyze a collection of [path source] pairs and resolve coupling between them.
-  opts can have :changes and :days for churn, and :root and :test-paths to say what
-  is test code."
+  opts can have :changes and :days for churn, :root and :test-paths to say what
+  is test code, and :api-namespaces and :api-paths, namespace names or globs and
+  path globs of files whose public functions are API and so never unused."
   ([file-sources] (analyze-files file-sources nil))
   ([file-sources opts]
    (analyze-loaded (map (fn [[p s]] [p (constantly s)]) file-sources) opts)))
