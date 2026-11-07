@@ -1,0 +1,34 @@
+# jolt / Clojure
+.jolt/
+.cpcache/
+.lsp/
+.nrepl-port
+**/.clj-kondo/.cache/
+.clj-kondo/
+
+# dirge agent state
+.dirge/
+
+# build output
+.target/
+
+# writ proof cache
+.writ-cache/
+
+# macOS
+.DS_Store
+
+# editors / backups
+*.swp
+*.swo
+*~
+
+# local agent / tooling state
+.claude/
+.agents/
+.codex/
+AGENTS.md
+CLAUDE.md
+
+# compiled native grammars (tree-sitter, etc.)
+native/

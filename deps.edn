@@ -1,0 +1,11 @@
+{:paths ["src"]
+
+ :aliases
+ {:test {:extra-paths ["test"]
+         :extra-deps  {io.github.jlt-commons/writ
+                       {:git/url "https://github.com/jlt-commons/writ"
+                        :git/sha "11ea31dfd4f261332df3b227c37c962e30eefb4e"}}
+         :main-opts   ["-m" "metrics.runner"]}
+  ;; local checkout of writ, for iterating on specs without a fetch
+  :dev {:override-deps {io.github.jlt-commons/writ
+                        {:local/root "/Users/yogthos/src/jlt-commons/writ"}}}}}
