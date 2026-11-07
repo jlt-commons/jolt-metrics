@@ -1,6 +1,6 @@
 # jolt-metrics
 
-A code metrics library for Clojure/Jolt source, written in Jolt. It computes
+A code metrics library for Clojure/Jolt and Scheme source, written in Jolt. It computes
 cyclomatic complexity, cognitive complexity, Halstead metrics, the
 maintainability index, and architecture coupling. Its report leads with a ranked
 refactoring queue, so an agent or a human can see what to clean up first and why.
@@ -39,10 +39,29 @@ jolt -m metrics.cli --help
 | `--top N` | 25 | queue entries to show in Markdown |
 | `--days N` | 90 | how much git history counts as recent churn |
 | `--no-git` | | skip git history, so no churn and no hotspots |
+| `--exclude GLOB` | | leave out matching files, relative to the directory; can be repeated |
+| `--config FILE` | `<dir>/.jolt-metrics.edn` | the config file |
 
 The command exits 2 on bad usage or a missing directory. A file that can't be read
 doesn't fail the run; the report lists it under `Files not analyzed`. Reading never
 evaluates the source: `#=` is a read error.
+
+### Configuration
+
+A project can list what to leave out once, in `.jolt-metrics.edn` in the analyzed
+directory:
+
+```clojure
+{:exclude ["vendor/**" "target/**" "src/parser_generated.clj"]
+ :test-paths ["test" "bench"]}
+```
+
+Patterns are relative to that directory, and `--exclude` adds to the list. `*` stays
+within a directory, `**` crosses them, and a bare directory covers its contents.
+Nothing is excluded by default, so vendored and generated code counts until you say
+otherwise. Files under `:test-paths` (by default `test` and `tests`, as a directory
+at any depth, or a glob) are test code: they're measured, but not queued or called
+unused.
 
 ### The report
 
@@ -137,6 +156,55 @@ source ──► normalized model ──► pure metric visitors ──► queue
 A definition is a `defn`, `defn-`, `defmacro`, `defmethod`, `deftest`, a method of
 `defrecord`, `deftype`, `extend-type` or `extend-protocol`, or a `def`, `defonce` or
 `defmulti` of an `fn`. Other top-level code counts toward its file's complexity.
+
+### Languages
+
+The pipeline only sees a language adapter (`metrics.language`), which says how to
+parse and scan a language. Parsing has to end in the forms the shared walker
+understands, so every language gets the same metrics from the same code. Adding a
+language means writing an adapter and listing it there.
+
+## Scheme
+
+`.ss`, `.scm`, `.sls` and `.sps` files are analyzed as Scheme, targeting Chez and
+Gambit; other dialects work as far as they share that syntax. A directory with both
+languages gets one report. All of it lives under `metrics.scheme`:
+
+- **`metrics.scheme.scanner`** says what a Scheme token is: a comma is unquote, a
+  bracket is a paren, and `#` covers block and datum comments and Gambit's `#!void`.
+- **`metrics.scheme.reader`** parses those tokens into forms. It only parses, so
+  nothing in the source can run.
+- **`metrics.scheme.normalize`** rewrites Scheme into the walker's shapes, and is the
+  one place that decides what Scheme means.
+- **`metrics.scheme.deps`** finds what a file depends on.
+
+| Scheme | Measured as |
+|---|---|
+| `(define (f x) ...)`, `(define f (lambda ...))` | a function |
+| `(define f (let (...) (lambda ...)))` | a function, its closure nested |
+| `define-syntax`, `define-macro` | a macro, with only its templates measured |
+| `lambda`, `case-lambda`, a `define` inside a function | a closure, which nests |
+| `(let name (...) ...)`, `do` | a loop |
+| `cond`, `exclusive-cond` | an else-if chain; `else` and `#t` are the free default |
+| `case`, `syntax-rules`, `syntax-case` | a switch; constants and patterns aren't code |
+| `unless` | `when-not` |
+| `guard` | `try` and `catch`, its clauses a `cond` inside the catch |
+| `begin`, `module`, `library`, `eval-when` at top level | opened, so what's inside counts |
+| quoted data | not code; in a quasiquote, only what's unquoted is |
+
+Every other list is a call. A name that would read as a Clojure form, like the `loop`
+in `(let loop ...)`, stays a call, and a form too malformed to translate, as can
+happen in a macro template, is read as one.
+
+Files depend on each other through `load`, `include` and `##include`, and through
+`import` of a `library`. A load's path can be relative to its file or the analyzed
+root, or the unique file ending that way. One built at runtime can't be known, and an
+ambiguous one makes no edge.
+
+Public functions aren't reported as unreferenced in Scheme, because a runtime's names
+are reached from emitted code and strings. There's no `private` to check, and no
+unused imports yet. Top-level code like `(let () (define ...))` counts toward its
+file but isn't queued.
 
 ### The scores
 

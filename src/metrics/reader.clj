@@ -1,7 +1,8 @@
 (ns metrics.reader
-  "Parse Clojure/Jolt source into the normalized model the metric visitors read:
-  functions, decision kinds (cyclomatic), the cognitive flow tree, Halstead
-  operators/operands, logical LOC, and namespace imports.
+  "Read Clojure/Jolt source, and walk forms into the normalized model the metric
+  visitors read: functions, decision kinds (cyclomatic), the cognitive flow tree,
+  Halstead operators/operands, logical LOC, and namespace imports.  The walker is
+  shared: another language's adapter gets its forms into the same shapes.
 
   The decision table (cyclomatic complexity):
     - if if-not if-let if-some when when-not when-let when-some when-first -> 1
@@ -637,19 +638,31 @@
            :operators (:operators tokens)
            :operands (:operands tokens))))
 
-(defn analyze-file
-  "Parse source into the per-file model (no line-based LOC; see metrics.core)."
-  [path source]
-  (let [forms (read-forms source)
-        top-code (top-level-code forms)
+(defn dependencies
+  "What a Clojure file depends on, for analyze-forms."
+  [forms]
+  {:namespace (namespace-name forms)
+   :imports (imports forms)
+   :libspecs (vec (libspecs forms))})
+
+(defn analyze-forms
+  "The per-file model of forms in the walker's shapes, whatever language they were
+  read from, with what the language's adapter found they depend on.  Line-based LOC
+  is metrics.core's job."
+  [path forms deps]
+  (let [top-code (top-level-code forms)
         code (remove #(and (seq? %) (= 'ns (first %))) forms)]
-    {:path path
-     :language :clojure
-     :namespace (namespace-name forms)
-     :imports (imports forms)
-     :libspecs (vec (libspecs forms))
-     :symbols (symbol-counts code)
-     :qualifiers (qualifiers code)
-     :functions (map function-model (functions forms))
-     :top-level-decision-kinds (mapcat decision-kinds top-code)
-     :top-level-flow (seq-tree top-code)}))
+    (merge
+     (select-keys deps [:namespace :imports :libspecs :load-paths])
+     {:path path
+      :symbols (symbol-counts code)
+      :qualifiers (qualifiers code)
+      :functions (map function-model (functions forms))
+      :top-level-decision-kinds (mapcat decision-kinds top-code)
+      :top-level-flow (seq-tree top-code)})))
+
+(defn analyze-file
+  "Parse Clojure source into the per-file model."
+  [path source]
+  (let [forms (read-forms source)]
+    (analyze-forms path forms (dependencies forms))))

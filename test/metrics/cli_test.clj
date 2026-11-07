@@ -2,7 +2,8 @@
   "The command line: exit codes and where the output goes."
   (:require [clojure.test :refer [deftest is]]
             [clojure.string :as str]
-            [metrics.cli :as cli]))
+            [metrics.cli :as cli]
+            [jolt.fs :as fs]))
 
 (deftest a-missing-directory-is-an-error
   (let [{:keys [exit err]} (cli/run ["/nonexistent/jolt-metrics"])]
@@ -51,3 +52,59 @@
   (let [{:keys [exit out]} (cli/run ["--help"])]
     (is (= 0 exit))
     (is (str/includes? out "--format"))))
+
+;; --- exclusions and the config file ----------------------------------------
+
+(defn- temp-project
+  "A directory holding these [relative-path source] files."
+  [files]
+  (let [dir (str (fs/create-temp-dir))]
+    (doseq [[p src] files]
+      (fs/create-dirs (fs/parent (str dir "/" p)))
+      (spit (str dir "/" p) src))
+    dir))
+
+(defn- analyzed-paths [dir & flags]
+  (let [data (read-string (:out (cli/run (concat [dir "--format" "edn" "--no-git"] flags))))]
+    (set (map #(subs (:path %) (inc (count dir))) (:files data)))))
+
+(deftest exclude-drops-files
+  (let [dir (temp-project [["src/a.clj" "(ns a)"] ["vendor/b.clj" "(ns b)"] ["gen/c.ss" "(define x 1)"]])]
+    (is (= #{"src/a.clj" "vendor/b.clj" "gen/c.ss"} (analyzed-paths dir)))
+    (is (= #{"src/a.clj" "gen/c.ss"} (analyzed-paths dir "--exclude" "vendor/**")))
+    (is (= #{"src/a.clj"} (analyzed-paths dir "--exclude" "vendor/**" "--exclude" "gen")))))
+
+(deftest the-config-file-is-read-from-the-directory
+  (let [dir (temp-project [["src/a.clj" "(ns a)"] ["vendor/b.clj" "(ns b)"]
+                           [".jolt-metrics.edn" "{:exclude [\"vendor/**\"]}"]])]
+    (is (= #{"src/a.clj"} (analyzed-paths dir)))))
+
+(deftest the-command-line-adds-to-the-config
+  (let [dir (temp-project [["a.clj" "(ns a)"] ["b.clj" "(ns b)"] ["c.clj" "(ns c)"]
+                           [".jolt-metrics.edn" "{:exclude [\"a.clj\"]}"]])]
+    (is (= #{"c.clj"} (analyzed-paths dir "--exclude" "b.clj")))))
+
+(deftest a-config-can-name-test-directories
+  (let [big (str "(defn f [x]\n" (apply str (repeat 60 "  (g x)\n")) "  x)")
+        dir (temp-project [["checks/a.clj" big] [".jolt-metrics.edn" "{:test-paths [\"checks\"]}"]])
+        data (read-string (:out (cli/run [dir "--format" "edn" "--no-git"])))]
+    (is (empty? (:queue data)))))
+
+(deftest a-config-can-be-named
+  (let [dir (temp-project [["a.clj" "(ns a)"] ["b.clj" "(ns b)"]])
+        config (str (fs/create-temp-dir) "/mine.edn")]
+    (spit config "{:exclude [\"a.clj\"]}")
+    (is (= #{"b.clj"} (analyzed-paths dir "--config" config)))))
+
+(deftest a-bad-config-is-an-error
+  (let [broken (temp-project [["a.clj" "(ns a)"] [".jolt-metrics.edn" "{:exclude ["]])
+        wrong (temp-project [["a.clj" "(ns a)"] [".jolt-metrics.edn" "[1 2]"]])
+        unknown (temp-project [["a.clj" "(ns a)"] [".jolt-metrics.edn" "{:exlude []}"]])]
+    (is (= 2 (:exit (cli/run [broken]))))
+    (is (= 2 (:exit (cli/run [wrong]))))
+    (is (str/includes? (:err (cli/run [unknown])) ":exlude"))
+    (is (= 2 (:exit (cli/run ["src" "--config" "/nonexistent/x.edn"]))))))
+
+(deftest a-config-cannot-run-code
+  (let [dir (temp-project [["a.clj" "(ns a)"] [".jolt-metrics.edn" "{:exclude #=(+ 1 2)}"]])]
+    (is (= 2 (:exit (cli/run [dir]))))))

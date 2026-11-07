@@ -4,8 +4,9 @@
   analyze-source computes every metric for one file; analyze-files resolves
   architecture coupling across files and rolls the project up."
   (:require [metrics.reader :as reader]
+            [metrics.language :as language]
             [metrics.loc :as loc]
-            [metrics.scanner :as scanner]
+            [metrics.paths :as paths]
             [metrics.cyclomatic :as cyclomatic]
             [metrics.cognitive :as cognitive]
             [metrics.halstead :as halstead]
@@ -14,8 +15,7 @@
             [metrics.hotspot :as hotspot]
             [metrics.queue :as queue]
             [metrics.cleanup :as cleanup]
-            [jolt.fs :as fs]
-            [clojure.string :as str]))
+            [jolt.fs :as fs]))
 
 (defn- average
   "The mean of xs, or nil when there is nothing to average."
@@ -104,21 +104,36 @@
    :cognitive (+ (cognitive/complexity (:top-level-flow model))
                  (reduce + 0 (map :cognitive fns)))})
 
+(defn- language-of
+  "The adapter for a path, which has to have one."
+  [path]
+  (or (language/of path)
+      (throw (ex-info (str "not a language we analyze: " path) {:path path}))))
+
+(defn- file-facts
+  "What a file is, apart from its scores."
+  [path lang model]
+  (merge
+   (select-keys model [:libspecs :symbols :qualifiers :load-paths])
+   {:path path
+    :namespace (some-> (:namespace model) str)
+    :language (:id lang)
+    :unused-public? (:unused-public? lang)
+    :imports (mapv str (:imports model))}))
+
 (defn analyze-source
   "Every metric for one file's source."
   [path source]
-  (let [model (reader/analyze-file path source)
-        scanned (scanner/scan source)
+  (let [lang (language-of path)
+        {:keys [forms dependencies]} ((:parse lang) source)
+        model (reader/analyze-forms path forms dependencies)
+        scanned ((:scan lang) source)
         locs (loc/tally (:classes scanned))
         fns (mapv #(function-metrics % scanned) (:functions model))
         file-h (average-halstead (map :halstead fns))]
     (merge
-     (select-keys model [:libspecs :symbols :qualifiers])
-     {:path path
-      :namespace (some-> (:namespace model) str)
-      :language :clojure
-      :loc locs
-      :imports (mapv str (:imports model))
+     (file-facts path lang model)
+     {:loc locs
       :functions (mapv #(dissoc % :halstead) fns)
       :halstead file-h}
      (file-scores model fns)
@@ -145,19 +160,34 @@
 
 (defn- risk-fn
   "A function giving a file's hotspot risk, or nil when it has too few changes to
-  say anything."
+  say anything.  Test files aren't hotspots, and don't set the scale either."
   [files]
-  (let [max-changes (reduce max 0 (keep :changes files))
-        max-complexity (reduce max 0 (map :cyclomatic files))]
-    (fn [{:keys [changes cyclomatic]}]
-      (when (and changes (>= changes queue/min-hotspot-changes))
+  (let [code (remove :test? files)
+        max-changes (reduce max 0 (keep :changes code))
+        max-complexity (reduce max 0 (map :cyclomatic code))]
+    (fn [{:keys [changes cyclomatic test?]}]
+      (when (and changes (not test?) (>= changes queue/min-hotspot-changes))
         (hotspot/risk max-changes max-complexity changes cyclomatic)))))
+
+(def default-test-paths
+  "The directories whose code is tests unless a project says otherwise."
+  ["test" "tests"])
+
+(defn- mark-test-file
+  "Everything defined in a test file is test code, helpers included, so it isn't
+  queued or called unused."
+  [file root test-paths]
+  (if (paths/test-file? (or test-paths default-test-paths) (paths/relative root (:path file)))
+    (-> file
+        (assoc :test? true)
+        (update :functions (fn [fns] (mapv #(assoc % :kind :test) fns))))
+    file))
 
 (defn- public-file
   "A file's metrics without what only the cleanup and queue passes needed."
   [file]
   (-> file
-      (dissoc :symbols :qualifiers :libspecs)
+      (dissoc :symbols :qualifiers :libspecs :unused-public? :load-paths)
       (update :functions (fn [fns] (mapv #(dissoc % :self-refs) fns)))))
 
 (defn- load-all
@@ -173,17 +203,29 @@
     {:files (vec (keep :file outcomes))
      :errors (vec (keep :error outcomes))}))
 
-(defn- dependency-edges
-  "[from to] paths for each import of a namespace in the project.  A namespace
-  defined by two files gets an edge to both."
+(defn- namespace-targets
+  "The project files a file imports by namespace.  A namespace defined by two files
+  gets an edge to both."
   [files]
   (let [ns->paths (reduce (fn [m f] (update m (:namespace f) (fnil conj []) (:path f)))
                           {}
                           (filter :namespace files))]
+    (fn [f] (mapcat ns->paths (:imports f)))))
+
+(defn- load-targets
+  "The project files a file loads by path."
+  [files root]
+  (let [known (set (map :path files))]
+    (fn [f] (keep #(paths/resolve-file known (:path f) % root) (:load-paths f)))))
+
+(defn- dependency-edges
+  "[from to] paths for what each file imports or loads from the project."
+  [files root]
+  (let [imported (namespace-targets files)
+        loaded (load-targets files root)]
     (distinct
      (for [f files
-           imp (:imports f)
-           target (get ns->paths imp)
+           target (concat (imported f) (loaded f))
            :when (not= target (:path f))]
        [(:path f) target]))))
 
@@ -201,18 +243,23 @@
            :instability i
            :instability-band (if i (coupling/instability-band i) :isolated))))
 
+(defn- annotated-files
+  "Files with what takes the whole project to know: coupling, churn and test status."
+  [files edges changes mark]
+  (let [eff (coupling/efferent edges)
+        aff (coupling/afferent edges)]
+    (mapv #(assoc (assoc-coupling (mark %) eff aff)
+                  :changes (when changes (get changes (:path %) 0)))
+          files)))
+
 (defn- analyze-loaded
   "The whole result for [path load-source] pairs.  With :changes, a map of path to
   commit count over the last :days days, it also has churn: hotspots, and a queue
   that puts them first."
-  [loaders {:keys [changes days]}]
+  [loaders {:keys [changes days root test-paths]}]
   (let [{:keys [files errors]} (load-all loaders)
-        edges (dependency-edges files)
-        eff (coupling/efferent edges)
-        aff (coupling/afferent edges)
-        files (mapv #(assoc (assoc-coupling % eff aff)
-                            :changes (when changes (get changes (:path %) 0)))
-                    files)
+        edges (dependency-edges files root)
+        files (annotated-files files edges changes #(mark-test-file % root test-paths))
         risk-of (risk-fn files)
         result-files (mapv public-file files)]
     {:files result-files
@@ -226,21 +273,22 @@
      :cleanup (cleanup/candidates-of files)}))
 
 (defn analyze-files
-  "Analyze a collection of [path source] pairs and resolve coupling between them."
+  "Analyze a collection of [path source] pairs and resolve coupling between them.
+  opts can have :changes and :days for churn, and :root and :test-paths to say what
+  is test code."
   ([file-sources] (analyze-files file-sources nil))
   ([file-sources opts]
    (analyze-loaded (map (fn [[p s]] [p (constantly s)]) file-sources) opts)))
 
-(def source-extensions #{"clj" "cljs" "cljc" "jolt"})
-
 (defn analyze-dir
-  "Analyze every Clojure/Jolt source file under a directory; opts as for
-  analyze-files."
+  "Analyze every source file of a language we know under a directory, leaving out
+  those :exclude globs match; other opts as for analyze-files."
   ([dir] (analyze-dir dir nil))
-  ([dir opts]
-   (let [paths (for [p (fs/glob dir "**.clj*")
-                     :let [ext (str/lower-case (or (fs/extension p) ""))]
-                     :when (contains? source-extensions ext)]
-                 (str p))
-         paths (concat paths (map str (fs/glob dir "**.jolt")))]
-     (analyze-loaded (for [p (distinct paths)] [p #(slurp p)]) opts))))
+  ([dir {:keys [exclude] :as opts}]
+   (let [paths (->> (language/globs)
+                    (mapcat #(fs/glob dir %))
+                    (map str)
+                    (filter language/of)
+                    (remove #(paths/excluded? exclude (paths/relative dir %)))
+                    distinct)]
+     (analyze-loaded (for [p paths] [p #(slurp p)]) (assoc opts :root dir)))))
