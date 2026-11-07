@@ -35,7 +35,10 @@
                         mi (maintainability/maintainability-index
                             (:volume h) cc (:lloc f) (:loc locs) (:cloc locs))]]
               {:name (str (:name f))
+               :kind (:kind f)
                :line (:line f)
+               :params (:params f)
+               :private (boolean (:private f))
                :lloc (:lloc f)
                :cyclomatic cc
                :cognitive cog
@@ -59,7 +62,8 @@
      :imports (mapv str (:imports model))
      :functions (vec fns)
      :cyclomatic file-cc
-     :cognitive (reduce + 0 (map :cognitive fns))
+     :cognitive (+ (cognitive/complexity (:top-level-flow model))
+                   (reduce + 0 (map :cognitive fns)))
      :halstead file-h
      :maintainability-index (:maintainability-index file-mi)
      :maintainability-index-without-comments (:maintainability-index-without-comments file-mi)

@@ -34,7 +34,7 @@
 (deftest extracts-functions
   (let [fns (r/functions '[(defn f [x] (if x 1 2)) (def g 3)])]
     (is (= 1 (count fns)))
-    (is (= 'f (:name (first fns))))
+    (is (= "f" (:name (first fns))))
     (is (= '[(if x 1 2)] (:body (first fns))))))
 
 (deftest flow-tree-if
