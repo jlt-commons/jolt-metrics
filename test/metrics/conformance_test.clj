@@ -2,7 +2,9 @@
   "Conformance tests: worked examples pinning the expected metric values.
 
   Cyclomatic: else/try/switch/default are free; if, loops, case and catch
-  count.  Cognitive: if/when/cond/case/loops/try/catch add 1 plus nesting."
+  count.  Cognitive follows the SonarSource rules, but a plain else stays free:
+  if/when/cond/case/loops/catch add 1 plus nesting, try adds nothing, an else-if
+  adds a flat 1, a logical operator run adds a flat 1, and fn raises nesting."
   (:require [clojure.test :refer [deftest is]]
             [metrics.reader :as r]
             [metrics.cyclomatic :as cyc]
@@ -53,12 +55,34 @@
   ;; if/else -> 1
   (is (= 1 (cog/complexity (r/flow-tree '(if a b c))))))
 
-(deftest cognitive-medium-is-six
-  ;; for(+1) if-in-for(+2) try(+1) catch-in-try(+2) -> 6
-  (is (= 6
+(deftest cognitive-medium-is-four
+  ;; for(+1) if-in-for(+2) try(0) catch(+1) -> 4
+  (is (= 4
          (cog/complexity
           (r/flow-tree '(do (for [i (range 10)] (if (even? i) a b))
                             (try x (catch Exception e y))))))))
+
+(deftest cognitive-try-is-free
+  (is (= 0 (cog/complexity (r/flow-tree '(try x (finally y))))))
+  (is (= 1 (cog/complexity (r/flow-tree '(try x (catch Exception e y)))))))
+
+(deftest cognitive-nested-else-if-is-flat
+  ;; for(+1) if-in-for(+2) else-if(+1) -> 4
+  (is (= 4 (cog/complexity (r/flow-tree '(for [i x] (if a b (if c d e))))))))
+
+(deftest cognitive-logical-runs-add-one
+  (is (= 2 (cog/complexity (r/flow-tree '(if (and a b) c d)))))
+  (is (= 2 (cog/complexity (r/flow-tree '(if (and a b c) d e)))))
+  (is (= 3 (cog/complexity (r/flow-tree '(if (and a (or b c)) d e)))))
+  (is (= 1 (cog/complexity (r/flow-tree '(if (and a) d e)))) "no operator to read"))
+
+(deftest cognitive-a-closure-raises-nesting
+  (is (= 2 (cog/complexity (r/flow-tree '(map (fn [x] (if x 1 2)) xs)))))
+  (is (= 2 (cog/complexity (r/flow-tree '(letfn [(f [x] (if x 1 2))] (f 1))))))
+  (is (= 2 (cog/complexity (r/flow-tree '(reify P (m [x] (if x 1 2))))))))
+
+(deftest cognitive-conditional-threading-nests
+  (is (= 1 (cog/complexity (r/flow-tree '(cond-> x a (f)))))))
 
 (deftest cognitive-nested-for-is-three
   ;; a loop containing an if: +1 + (1 + 1) = 3

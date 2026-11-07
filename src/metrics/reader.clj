@@ -14,8 +14,9 @@
     - dotimes while loop -> 1
     - catch -> 1 (try itself is not a branch)
 
-  Cognitive complexity: if/when/cond/case/loops/try/catch add 1 plus nesting
-  depth.")
+  Cognitive complexity: if/when/cond/case/cond->/loops/catch add 1 plus nesting
+  depth; an else-if and a logical operator run add a flat 1; try adds nothing; a
+  closure (fn, letfn, reify, proxy) adds nothing but nests what it holds.")
 
 ;; --- reading -------------------------------------------------------------
 
@@ -355,7 +356,8 @@
   (cons-tree (map flow-tree forms)))
 
 (defn flow-tree
-  "The cognitive tree of form: [:Leaf] | [:Seq h t] | [:If t th e] | [:Else x] | [:Nest b]."
+  "The cognitive tree of form:
+  [:Leaf] | [:Seq h t] | [:If t th e] | [:Else x] | [:Nest b] | [:Flat b] | [:Deep b]."
   [form]
   (if (seq? form)
     (let [h (head-name form)
@@ -370,9 +372,20 @@
         [:If (flow-tree (first args)) (seq-tree (rest args)) [:Leaf]]
 
         (or (contains? loop-forms h)
-            (contains? '#{cond condp case try catch} h)
+            (contains? '#{cond condp case catch} h)
             (contains? cond-threading-forms h))
         [:Nest (seq-tree (code-children form))]
+
+        (contains? logical-forms h)
+        (if (next args)
+          [:Flat (seq-tree args)]
+          (seq-tree args))
+
+        (contains? '#{fn fn* reify proxy} h)
+        [:Deep (seq-tree args)]
+
+        (= 'letfn h)
+        [:Seq [:Deep (flow-tree (first args))] (seq-tree (rest args))]
 
         :else (seq-tree (code-children form))))
     (seq-tree (code-children form))))

@@ -40,9 +40,9 @@
        (str "| Comment lines | " (:cloc summary) " |\n")
        (str "| Functions | " (:functions summary) " |\n")
        (str "| Total cyclomatic complexity | " (:cyclomatic summary) " |\n")
-       (str "| Average cyclomatic complexity | " (fmt (:avg-cyclomatic summary)) " |\n")
+       (str "| Average cyclomatic complexity per function | " (fmt (:avg-cyclomatic summary)) " |\n")
        (str "| Total cognitive complexity | " (:cognitive summary) " |\n")
-       (str "| Average maintainability index | " (fmt (:avg-maintainability summary)) " |\n")
+       (str "| Average maintainability index (comment-free) | " (fmt (:avg-maintainability summary)) " |\n")
        (str "| Average instability | " (fmt (:avg-instability summary)) " |\n")))
 
 (defn render-files [files]
@@ -57,7 +57,7 @@
                      " | " (:cyclomatic f)
                      " | " (:cognitive f)
                      " | " (fmt (:volume (:halstead f)))
-                     " | " (fmt (:maintainability-index f))
+                     " | " (fmt (:maintainability-index-without-comments f))
                      " | " (fmt (:instability f))
                      " |\n")))))
 

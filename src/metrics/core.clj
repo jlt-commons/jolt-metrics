@@ -5,6 +5,7 @@
   architecture coupling across files and rolls the project up."
   (:require [metrics.reader :as reader]
             [metrics.loc :as loc]
+            [metrics.scanner :as scanner]
             [metrics.cyclomatic :as cyclomatic]
             [metrics.cognitive :as cognitive]
             [metrics.halstead :as halstead]
@@ -13,8 +14,17 @@
             [jolt.fs :as fs]
             [clojure.string :as str]))
 
-(defn- average-halstead [hs]
-  (let [hs (remove nil? hs)
+(defn- average
+  "The mean of xs, or nil when there is nothing to average."
+  [xs]
+  (when (seq xs)
+    (/ (reduce + 0 xs) (count xs))))
+
+(defn- average-halstead
+  "The mean Halstead metrics of the scopes that hold any code at all; an empty
+  function has nothing to measure and must not drag the average down."
+  [hs]
+  (let [hs (remove #(zero? (:length %)) hs)
         n (count hs)]
     (if (zero? n)
       (halstead/calculate [] [])
@@ -23,44 +33,68 @@
                          hs)]
         (into {} (map (fn [[k v]] [k (/ v n)]) sums))))))
 
+(defn- unit-lines
+  "A definition's end line and the classes of the lines it spans."
+  [{:keys [line column]} {:keys [classes extents]}]
+  (let [end-line (get extents [line column] line)
+        start (min (max 0 (dec line)) (count classes))]
+    {:end-line end-line
+     :locs (loc/tally (subvec classes start (max start (min end-line (count classes)))))}))
+
+(defn- function-metrics
+  "Every metric of one definition.  The index uses the definition's own lines, so
+  comments elsewhere in the file cannot change it."
+  [f scanned]
+  (let [h (halstead/calculate (:operators f) (:operands f))
+        cc (cyclomatic/complexity (:decision-kinds f))
+        {:keys [end-line locs]} (unit-lines f scanned)
+        mi (maintainability/maintainability-index
+            (:volume h) cc (:sloc locs) (:loc locs) (:cloc locs))]
+    {:name (str (:name f))
+     :kind (:kind f)
+     :line (:line f)
+     :end-line end-line
+     :locs locs
+     :lloc (:lloc f)
+     :params (:params f)
+     :private (boolean (:private f))
+     :cyclomatic cc
+     :cognitive (cognitive/complexity (:flow f))
+     :nesting (cognitive/max-nesting (:flow f))
+     :halstead h
+     :halstead-volume (:volume h)
+     :maintainability-index (:maintainability-index mi)
+     :maintainability-index-without-comments (:maintainability-index-without-comments mi)
+     :comment-weight (:comment-weight mi)}))
+
 (defn analyze-source
-  "Every metric for one file's source."
+  "Every metric for one file's source.  The file's index is the original formula:
+  the average volume, complexity and size of its definitions, plus its own comment
+  ratio.  Summing them instead would make it a measure of how long the file is."
   [path source]
   (let [model (reader/analyze-file path source)
-        locs (loc/count-lines source)
-        fns (for [f (:functions model)
-                  :let [h (halstead/calculate (:operators f) (:operands f))
-                        cc (cyclomatic/complexity (:decision-kinds f))
-                        cog (cognitive/complexity (:flow f))
-                        mi (maintainability/maintainability-index
-                            (:volume h) cc (:lloc f) (:loc locs) (:cloc locs))]]
-              {:name (str (:name f))
-               :kind (:kind f)
-               :line (:line f)
-               :params (:params f)
-               :private (boolean (:private f))
-               :lloc (:lloc f)
-               :cyclomatic cc
-               :cognitive cog
-               :halstead-volume (:volume h)
-               :maintainability-index (:maintainability-index mi)
-               :maintainability-index-without-comments (:maintainability-index-without-comments mi)
-               :comment-weight (:comment-weight mi)})
-        file-h (average-halstead (for [f (:functions model)]
-                                   (halstead/calculate (:operators f) (:operands f))))
+        scanned (scanner/scan source)
+        locs (loc/tally (:classes scanned))
+        fns (mapv #(function-metrics % scanned) (:functions model))
+        measured (remove #(zero? (get-in % [:halstead :length])) fns)
+        file-h (average-halstead (map :halstead fns))
         file-cc (cyclomatic/file-complexity
                  (:top-level-decision-kinds model)
                  (map :cyclomatic fns))
-        file-lloc (reduce + 0 (map :lloc fns))
-        file-mi (maintainability/maintainability-index
-                 (:volume file-h) file-cc file-lloc (:loc locs) (:cloc locs))]
+        file-mi (when (seq measured)
+                  (maintainability/maintainability-index
+                   (:volume file-h)
+                   (average (map :cyclomatic measured))
+                   (average (map #(get-in % [:locs :sloc]) measured))
+                   (:loc locs)
+                   (:cloc locs)))]
     {:path path
      :namespace (some-> (:namespace model) str)
      :language :clojure
      :loc locs
-     :lloc file-lloc
+     :lloc (reduce + 0 (map :lloc fns))
      :imports (mapv str (:imports model))
-     :functions (vec fns)
+     :functions (mapv #(dissoc % :halstead) fns)
      :cyclomatic file-cc
      :cognitive (+ (cognitive/complexity (:top-level-flow model))
                    (reduce + 0 (map :cognitive fns)))
@@ -69,27 +103,23 @@
      :maintainability-index-without-comments (:maintainability-index-without-comments file-mi)
      :comment-weight (:comment-weight file-mi)}))
 
-(defn- average
-  "The mean of xs, or nil when there is nothing to average."
-  [xs]
-  (when (seq xs)
-    (/ (reduce + 0 xs) (count xs))))
-
 (defn summarize
   "Project-level rollups over per-file metrics; unreadable is how many files
-  could not be analyzed at all."
+  could not be analyzed at all.  The averages are per function, and the
+  maintainability one covers only files with a defined, comment-free index."
   [files unreadable]
-  (let [n (count files)]
+  (let [n (count files)
+        fns (mapcat :functions files)]
     {:files n
      :unreadable unreadable
      :loc (reduce + 0 (map (comp :loc :loc) files))
      :sloc (reduce + 0 (map (comp :sloc :loc) files))
      :cloc (reduce + 0 (map (comp :cloc :loc) files))
-     :functions (reduce + 0 (map (comp count :functions) files))
+     :functions (count fns)
      :cyclomatic (reduce + 0 (map :cyclomatic files))
      :cognitive (reduce + 0 (map :cognitive files))
-     :avg-cyclomatic (if (pos? n) (/ (reduce + 0 (map :cyclomatic files)) n) 0)
-     :avg-maintainability (average (keep :maintainability-index files))
+     :avg-cyclomatic (average (map :cyclomatic fns))
+     :avg-maintainability (average (keep :maintainability-index-without-comments files))
      :avg-instability (if (pos? n) (/ (reduce + 0 (map :instability files)) n) 0)}))
 
 (defn- analyze-loaded
