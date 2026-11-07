@@ -1,7 +1,7 @@
 (ns metrics.core
   "The entry point: turn a project's Clojure/Jolt source into a metrics report.
 
-  analyze-source computes every metric for one file; analyze-project resolves
+  analyze-source computes every metric for one file; analyze-files resolves
   architecture coupling across files and rolls the project up."
   (:require [metrics.reader :as reader]
             [metrics.loc :as loc]
