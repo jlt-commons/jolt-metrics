@@ -11,10 +11,6 @@
                 r (/ (Math/round (* 10.0 d)) 10.0)]
             (str r))))
 
-(defn- bar [label n width]
-  (let [n (max 0 (min 1 (double n)))]
-    (str "`" label "` " (apply str (repeat (int (* n width)) "#")))))
-
 (defn- top-functions [files key n]
   (->> (for [f files, fn (:functions f)]
          [(:name fn) (:path f) (:line fn) (key fn)])

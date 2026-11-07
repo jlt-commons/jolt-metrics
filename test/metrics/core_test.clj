@@ -110,3 +110,44 @@
 
 (deftest an-empty-project-renders
   (is (string? (report/render (core/analyze-files [])))))
+
+;; --- coupling ------------------------------------------------------------
+
+(defn- by-path [result]
+  (into {} (map (juxt :path identity) (:files result))))
+
+(deftest a-namespace-in-two-files-receives-both-edges
+  (let [result (core/analyze-files [["z.clj" "(ns z (:require [a]))"]
+                                    ["a.clj" "(ns a)"]
+                                    ["a.cljs" "(ns a)"]])]
+    (is (= #{["z.clj" "a.clj"] ["z.clj" "a.cljs"]} (set (:edges result))))
+    (is (= 1 (:afferent-coupling ((by-path result) "a.clj"))))
+    (is (= 1 (:afferent-coupling ((by-path result) "a.cljs"))))))
+
+(deftest prefix-lists-reach-the-coupling
+  (let [result (core/analyze-files [["z.clj" "(ns z (:require [foo [bar :as b]]))"]
+                                    ["b.clj" "(ns foo.bar)"]])]
+    (is (= [["z.clj" "b.clj"]] (:edges result)))))
+
+(deftest top-level-requires-reach-the-coupling
+  (let [result (core/analyze-files [["z.clj" "(require '[foo.bar :as b])"]
+                                    ["b.clj" "(ns foo.bar)"]])]
+    (is (= [["z.clj" "b.clj"]] (:edges result)))))
+
+(deftest an-isolated-namespace-is-not-called-stable
+  (let [result (core/analyze-files [["a.clj" "(ns a)"]
+                                    ["b.clj" "(ns b (:require [c]))"]
+                                    ["c.clj" "(ns c)"]])
+        files (by-path result)]
+    (is (= :isolated (:instability-band (files "a.clj"))))
+    (is (nil? (:instability (files "a.clj"))))
+    (is (= :stable (:instability-band (files "c.clj"))))
+    (testing "the average leaves it out"
+      (is (= 1/2 (:avg-instability (:summary result)))))))
+
+(deftest no-coupling-at-all-has-no-average
+  (is (nil? (:avg-instability (:summary (core/analyze-files [["a.clj" "(ns a)"]]))))))
+
+(deftest the-report-renders-isolated-namespaces
+  (is (re-find #"a\.clj \| 0 \| 0 \| - \| isolated"
+               (report/render (core/analyze-files [["a.clj" "(ns a)"]])))))

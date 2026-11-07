@@ -262,20 +262,66 @@
     (when (and n (symbol? (second n)))
       (second n))))
 
-(defn imports
-  "The namespaces a file requires or imports, from its ns form."
+(defn- expand-libspec
+  "The libs a libspec names, as {:lib sym :as alias :refer [...]}.  A prefix list
+  is [prefix & more] whose first more is not an option keyword."
+  [prefix spec]
+  (let [qualified #(if prefix (symbol (str prefix "." %)) %)]
+    (cond
+      (symbol? spec) [{:lib (qualified spec)}]
+      (and (sequential? spec) (symbol? (first spec)))
+      (let [[lib & more] spec]
+        (if (and (seq more) (not (keyword? (first more))))
+          (mapcat #(expand-libspec (qualified lib) %) more)
+          [(assoc (when (even? (count more)) (apply hash-map more))
+                  :lib (qualified lib))]))
+      :else nil)))
+
+(defn- import-package
+  "The package an :import spec names: (pkg Class...) or the qualified pkg.Class."
+  [spec]
+  (cond (symbol? spec) spec
+        (sequential? spec) (first spec)
+        :else nil))
+
+(defn- unquoted [form]
+  (if (and (seq? form) (= 'quote (first form))) (second form) form))
+
+(defn- top-level-libspecs
+  "The libs of top-level (require ...) and (use ...) calls, the way a script
+  loads them; a spec computed at runtime is not knowable from here."
+  [forms]
+  (for [form (top-forms forms)
+        :when (and (seq? form) (contains? '#{require use} (first form)))
+        spec (rest form)
+        :when (and (seq? spec) (= 'quote (first spec)))
+        lib (expand-libspec nil (unquoted spec))]
+    lib))
+
+(defn libspecs
+  "Everything a file requires, from its ns form and top-level require or use calls."
   [forms]
   (let [n (ns-form forms)]
-    (if-not n
-      []
-      (vec (distinct
-            (for [clause (rest n)
-                  :when (and (seq? clause) (#{:require :use :import} (first clause)))
-                  spec (rest clause)
-                  :let [sym (cond (symbol? spec) spec
-                                  (or (vector? spec) (seq? spec)) (first spec))]
-                  :when sym]
-              sym))))))
+    (concat
+     (for [clause (rest n)
+           :when (and (seq? clause) (#{:require :require-macros :use :use-macros} (first clause)))
+           spec (rest clause)
+           lib (expand-libspec nil spec)]
+       lib)
+     (top-level-libspecs forms))))
+
+(defn imports
+  "The namespaces a file depends on, in source order, from its libspecs and any
+  :import packages."
+  [forms]
+  (let [n (ns-form forms)
+        packages (for [clause (rest n)
+                       :when (and (seq? clause) (= :import (first clause)))
+                       spec (rest clause)
+                       :let [p (import-package spec)]
+                       :when p]
+                   p)]
+    (vec (distinct (concat (map :lib (libspecs forms)) packages)))))
 
 ;; --- decision kinds (cyclomatic) -----------------------------------------
 

@@ -120,7 +120,7 @@
      :cognitive (reduce + 0 (map :cognitive files))
      :avg-cyclomatic (average (map :cyclomatic fns))
      :avg-maintainability (average (keep :maintainability-index-without-comments files))
-     :avg-instability (if (pos? n) (/ (reduce + 0 (map :instability files)) n) 0)}))
+     :avg-instability (average (keep :instability files))}))
 
 (defn- analyze-loaded
   "Analyze [path load-source] pairs.  A file that cannot be loaded or read is
@@ -134,24 +134,27 @@
                        loaders)
         errors (vec (keep :error outcomes))
         files (vec (keep :file outcomes))
-        ns->path (into {} (for [f files :when (:namespace f)] [(:namespace f) (:path f)]))
-        edges (for [f files
-                    imp (:imports f)
-                    :let [target (get ns->path imp)]
-                    :when (and target (not= target (:path f)))]
-                [(:path f) target])
+        ns->paths (reduce (fn [m f] (update m (:namespace f) (fnil conj []) (:path f)))
+                          {}
+                          (filter :namespace files))
+        edges (distinct
+               (for [f files
+                     imp (:imports f)
+                     target (get ns->paths imp)
+                     :when (not= target (:path f))]
+                 [(:path f) target]))
         eff (coupling/efferent edges)
         aff (coupling/afferent edges)
         files (mapv (fn [f]
                       (let [p (:path f)
                             ce (count (get eff p #{}))
                             ca (count (get aff p #{}))
-                            i (coupling/instability ce ca)]
+                            i (when (pos? (+ ce ca)) (coupling/instability ce ca))]
                         (assoc f
                                :efferent-coupling ce
                                :afferent-coupling ca
                                :instability i
-                               :instability-band (coupling/instability-band i))))
+                               :instability-band (if i (coupling/instability-band i) :isolated))))
                     files)]
     {:files files
      :errors errors
