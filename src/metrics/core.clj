@@ -6,6 +6,7 @@
   (:require [metrics.reader :as reader]
             [metrics.language :as language]
             [metrics.loc :as loc]
+            [metrics.paths :as paths]
             [metrics.cyclomatic :as cyclomatic]
             [metrics.cognitive :as cognitive]
             [metrics.halstead :as halstead]
@@ -159,13 +160,28 @@
 
 (defn- risk-fn
   "A function giving a file's hotspot risk, or nil when it has too few changes to
-  say anything."
+  say anything.  Test files aren't hotspots, and don't set the scale either."
   [files]
-  (let [max-changes (reduce max 0 (keep :changes files))
-        max-complexity (reduce max 0 (map :cyclomatic files))]
-    (fn [{:keys [changes cyclomatic]}]
-      (when (and changes (>= changes queue/min-hotspot-changes))
+  (let [code (remove :test? files)
+        max-changes (reduce max 0 (keep :changes code))
+        max-complexity (reduce max 0 (map :cyclomatic code))]
+    (fn [{:keys [changes cyclomatic test?]}]
+      (when (and changes (not test?) (>= changes queue/min-hotspot-changes))
         (hotspot/risk max-changes max-complexity changes cyclomatic)))))
+
+(def default-test-paths
+  "The directories whose code is tests unless a project says otherwise."
+  ["test" "tests"])
+
+(defn- mark-test-file
+  "Everything defined in a test file is test code, helpers included, so it isn't
+  queued or called unused."
+  [file root test-paths]
+  (if (paths/test-file? (or test-paths default-test-paths) (paths/relative root (:path file)))
+    (-> file
+        (assoc :test? true)
+        (update :functions (fn [fns] (mapv #(assoc % :kind :test) fns))))
+    file))
 
 (defn- public-file
   "A file's metrics without what only the cleanup and queue passes needed."
@@ -215,18 +231,23 @@
            :instability i
            :instability-band (if i (coupling/instability-band i) :isolated))))
 
+(defn- annotated-files
+  "Files with what takes the whole project to know: coupling, churn and test status."
+  [files edges changes mark]
+  (let [eff (coupling/efferent edges)
+        aff (coupling/afferent edges)]
+    (mapv #(assoc (assoc-coupling (mark %) eff aff)
+                  :changes (when changes (get changes (:path %) 0)))
+          files)))
+
 (defn- analyze-loaded
   "The whole result for [path load-source] pairs.  With :changes, a map of path to
   commit count over the last :days days, it also has churn: hotspots, and a queue
   that puts them first."
-  [loaders {:keys [changes days]}]
+  [loaders {:keys [changes days root test-paths]}]
   (let [{:keys [files errors]} (load-all loaders)
         edges (dependency-edges files)
-        eff (coupling/efferent edges)
-        aff (coupling/afferent edges)
-        files (mapv #(assoc (assoc-coupling % eff aff)
-                            :changes (when changes (get changes (:path %) 0)))
-                    files)
+        files (annotated-files files edges changes #(mark-test-file % root test-paths))
         risk-of (risk-fn files)
         result-files (mapv public-file files)]
     {:files result-files
@@ -240,19 +261,22 @@
      :cleanup (cleanup/candidates-of files)}))
 
 (defn analyze-files
-  "Analyze a collection of [path source] pairs and resolve coupling between them."
+  "Analyze a collection of [path source] pairs and resolve coupling between them.
+  opts can have :changes and :days for churn, and :root and :test-paths to say what
+  is test code."
   ([file-sources] (analyze-files file-sources nil))
   ([file-sources opts]
    (analyze-loaded (map (fn [[p s]] [p (constantly s)]) file-sources) opts)))
 
 (defn analyze-dir
-  "Analyze every source file of a language we know under a directory; opts as for
-  analyze-files."
+  "Analyze every source file of a language we know under a directory, leaving out
+  those :exclude globs match; other opts as for analyze-files."
   ([dir] (analyze-dir dir nil))
-  ([dir opts]
+  ([dir {:keys [exclude] :as opts}]
    (let [paths (->> (language/globs)
                     (mapcat #(fs/glob dir %))
                     (map str)
                     (filter language/of)
+                    (remove #(paths/excluded? exclude (paths/relative dir %)))
                     distinct)]
-     (analyze-loaded (for [p paths] [p #(slurp p)]) opts))))
+     (analyze-loaded (for [p paths] [p #(slurp p)]) (assoc opts :root dir)))))

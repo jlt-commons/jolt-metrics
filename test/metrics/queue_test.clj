@@ -239,3 +239,30 @@
     (is (str/includes? (md {:changes {"a.clj" 9} :days 30}) "## Hotspots"))
     (is (str/includes? (md {:changes {"a.clj" 9} :days 30}) "30 days"))
     (is (not (str/includes? (md nil) "## Hotspots")))))
+
+;; --- test files and exclusions ---------------------------------------------
+
+(deftest helpers-in-test-directories-are-not-queued
+  (let [result (core/analyze-files [["test/a.clj" (branchy "helper" 25)]
+                                    ["src/b.clj" (branchy "code" 25)]])]
+    (is (= ["code"] (map :name (:queue result))))
+    (is (= :test (:kind (first (:functions (first (:files result)))))))))
+
+(deftest test-directories-are-configurable
+  (let [result (core/analyze-files [["checks/a.clj" (branchy "helper" 25)]
+                                    ["test/b.clj" (branchy "code" 25)]]
+                                   {:test-paths ["checks"]})]
+    (is (= ["code"] (map :name (:queue result))))))
+
+(deftest a-long-test-file-is-not-queued
+  (let [big (apply str (repeat 600 "(def x 1)\n"))]
+    (is (empty? (:queue (core/analyze-files [["test/a.clj" big]]))))))
+
+(deftest test-paths-are-relative-to-the-root
+  (let [result (core/analyze-files [["/home/test/proj/src/a.clj" (branchy "code" 25)]]
+                                   {:root "/home/test/proj"})]
+    (is (= ["code"] (map :name (:queue result))))))
+
+(deftest test-helpers-are-not-unused
+  (is (empty? (:unused-public (:cleanup (core/analyze-files
+                                         [["test/a.clj" "(ns a) (defn helper [] 1)"]]))))))

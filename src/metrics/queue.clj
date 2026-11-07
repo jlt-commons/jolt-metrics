@@ -118,9 +118,11 @@
            violations
            risk)))
 
-(defn- file-entry [file risk]
+(defn- file-entry
+  "A file's own entry; a long test file is not a problem to refactor."
+  [file risk]
   (let [violations (file-violations file risk)]
-    (when (seq violations)
+    (when (and (seq violations) (not (:test? file)))
       [(entry {:kind :file
                :name (:path file)
                :path (:path file)
