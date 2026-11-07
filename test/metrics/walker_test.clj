@@ -178,3 +178,41 @@
   (let [ods (:operands (r/halstead-tokens '(f "a" a :a nil)))]
     (is (= 4 (count (distinct ods)))))
   (is (= 1 (count (:operands (r/halstead-tokens (read1 "(f #\"a\")")))))))
+
+;; --- named helpers are units of their own ---------------------------------
+
+(deftest letfn-helpers-are-measured-on-their-own
+  (let [[f g h :as all] (units (str "(defn f [x]\n"
+                                    "  (letfn [(g [a b] (if a 1 2))\n"
+                                    "          (h [c] (when c (g c c)))]\n"
+                                    "    (if x (h x) 0)))"))]
+    (is (= [["f" :function] ["f/g" :helper] ["f/h" :helper]] (map (juxt :name :kind) all)))
+    (testing "the outer function keeps only its own code"
+      (is (= [2 1 1 1] ((juxt :cyclomatic :cognitive :nesting :params) f)))
+      (is (= 2 (get-in f [:locs :sloc])) "the helpers' lines are theirs"))
+    (testing "each helper has its own figures and extent"
+      (is (= [2 1 1 2] ((juxt :cyclomatic :cognitive :nesting :params) g)))
+      (is (= [2 1 1 1] ((juxt :cyclomatic :cognitive :nesting :params) h)))
+      (is (= [2 2 1] [(:line g) (:end-line g) (get-in g [:locs :sloc])]))
+      (is (= [3 3] [(:line h) (:end-line h)])))))
+
+(deftest helpers-nest-and-can-sit-in-a-closure
+  (is (= [["f" 1] ["f/g" 1] ["f/g/h" 2]]
+         (map (juxt :name :cyclomatic)
+              (units "(defn f [] (letfn [(g [] (letfn [(h [x] (if x 1 2))] (h 1)))] (g)))"))))
+  (is (= [["f" 1] ["f/g" 2]]
+         (map (juxt :name :cyclomatic)
+              (units "(defn f [] (fn [] (letfn [(g [x] (if x 1 2))] (g 1))))")))))
+
+(deftest a-multi-arity-helper-reads-every-arity
+  (let [g (second (units "(defn f [] (letfn [(g ([a] (if a 1 2)) ([a b] (if b a 2)))] (g 1)))"))]
+    (is (= ["f/g" 3 2] ((juxt :name :cyclomatic :params) g)))))
+
+(deftest an-anonymous-fn-stays-part-of-its-parent
+  (is (= [["f" 2]] (map (juxt :name :cyclomatic) (units "(defn f [xs] (map (fn [x] (if x 1 2)) xs))")))))
+
+(deftest quoted-letfn-is-data
+  (is (= ["f"] (map :name (units "(defn f [] '(letfn [(g [] 1)] (g)))")))))
+
+(deftest the-file-total-counts-each-helper
+  (is (= 3 (:cyclomatic (core/analyze-source "x.clj" "(defn f [] (letfn [(g [x] (if x 1 2))] (g 1)))")))))

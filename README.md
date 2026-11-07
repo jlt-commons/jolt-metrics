@@ -53,7 +53,9 @@ directory:
 
 ```clojure
 {:exclude ["vendor/**" "target/**" "src/parser_generated.clj"]
- :test-paths ["test" "bench"]}
+ :test-paths ["test" "bench"]
+ :api-namespaces ["my.lib" "my.lib.api.*"]
+ :api-paths ["src/my/lib/core"]}
 ```
 
 Patterns are relative to that directory, and `--exclude` adds to the list. `*` stays
@@ -62,6 +64,14 @@ Nothing is excluded by default, so vendored and generated code counts until you 
 otherwise. Files under `:test-paths` (by default `test` and `tests`, as a directory
 at any depth, or a glob) are test code: they're measured, but not queued or called
 unused.
+
+`:api-namespaces` names the namespaces that are public API, called from code outside
+the analyzed files, so their public functions are never listed as unreferenced. An
+entry is a namespace name, or a glob where `*` stands for any run of characters,
+dots included: `"my.lib.*"` covers `my.lib.core` and `my.lib.core.impl` but not
+`my.lib` itself. `:api-paths` does the same for files by path, with globs like
+`:exclude`'s, which covers files that have no `ns` form to match. Private functions
+in either are still checked.
 
 ### The report
 
@@ -74,7 +84,8 @@ unused.
    the queue.
 5. **Cleanup candidates**: unused requires, and functions nothing mentions. Matching
    is by name and conservative, but runtime lookups and outside callers can't be
-   seen, so check public functions before removing them.
+   seen, so check public functions before removing them, and name your API
+   namespaces in the config to keep them off the list.
 6. **Files** and **Architecture**: the numbers per file, coupling, and dependencies.
 7. **Thresholds**: what the severities mean.
 
@@ -183,7 +194,8 @@ languages gets one report. All of it lives under `metrics.scheme`:
 | `(define (f x) ...)`, `(define f (lambda ...))` | a function |
 | `(define f (let (...) (lambda ...)))` | a function, its closure nested |
 | `define-syntax`, `define-macro` | a macro, with only its templates measured |
-| `lambda`, `case-lambda`, a `define` inside a function | a closure, which nests |
+| a `define` of a function inside a function, a `letrec`/`letrec*` lambda | a helper of its own, as by `letfn` |
+| `lambda`, `case-lambda` | a closure, which nests |
 | `(let name (...) ...)`, `do` | a loop |
 | `cond`, `exclusive-cond` | an else-if chain; `else` and `#t` are the free default |
 | `case`, `syntax-rules`, `syntax-case` | a switch; constants and patterns aren't code |
@@ -223,6 +235,18 @@ its contract (signatures, a state graph, a model law, and worked examples).
 The `*_test.clj` files cover the rest with plain `clojure.test`, and
 `walker_test.clj` pins what the reader counts with golden examples.
 
+## Named helpers
+
+A function's named inner helpers are measured on their own, not charged to it. Each
+function a `letfn` binds is a unit named `outer/helper`, with its own complexity,
+nesting, lines and parameters, and its kind is `:helper`. A helper's helpers are
+`outer/helper/inner`. The outer function keeps its own code and lines and none of
+theirs; an anonymous `fn` has no name to stand on its own under, so it stays part of
+the function around it. In Scheme, a `define` of a function inside another and a
+lambda bound by `letrec` or `letrec*` are helpers the same way. A lambda bound by a
+plain `let` is not, and a named `let` is a loop. Helpers are never cleanup candidates.
+A file's total complexity counts each helper as the function it is.
+
 ## The decision table
 
 Cyclomatic complexity counts one decision point per:
@@ -248,7 +272,7 @@ paper](https://www.sonarsource.com/docs/CognitiveComplexity.pdf):
 - a run of a logical operator adds a flat 1
 - `try` and `finally` add nothing, nor do `some->` and friends, like the paper's
   null-coalescing operators
-- `fn`/`letfn`/`reify`/`proxy` add nothing but nest what they hold
+- `fn`/`reify`/`proxy` add nothing but nest what they hold
 
 It differs from the paper in two ways. A plain `else` is free, since nearly every
 Clojure `if` has one. Recursion adds nothing, though the paper adds 1 per function

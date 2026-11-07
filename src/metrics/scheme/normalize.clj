@@ -5,6 +5,9 @@
 
     (define (f x) ...)          (defn f [x] ...)
     (lambda (x) ...)            (fn [x] ...)
+    an inner (define (g x) ...) (letfn [(g [x] ...)])
+    (letrec ([g (lambda ...)]   (letfn [(g [...] ...)]
+             [v e]) ...)          (let [v e] ...))
     (let loop (...) ...), do    (loop [...] ...)
     (cond [t b] [else e])       (cond t b :else e)
     (case x [(1 2) a] [else b]) (case x (1 2) a b)
@@ -92,14 +95,28 @@
     (curried (first target) [(list* 'lambda (rest target) body)])
     [(first target) (rest target) body]))
 
+(defn- function-value? [value]
+  (and (seq? value) (contains? '#{lambda case-lambda} (first value))))
+
+(defn- helper
+  "A named function inside another, as a letfn binding: (g [x] ...), or
+  (g ([x] ...) ...) for a case-lambda.  It keeps the position of source."
+  [source fname value]
+  (like source
+        (if (= 'lambda (first value))
+          (list* fname (params (second value)) (exprs (drop 2 value)))
+          (list* fname (map arity (rest value))))))
+
 (defn- nested-define
-  "A definition inside a function is a closure, whose body is nested.  A value is
-  just its expression."
-  [[_ target & body]]
-  (if (seq? target)
-    (let [[fname ps inner] (curried target body)]
-      (list* 'fn fname (params ps) (exprs inner)))
-    (sequence-of body)))
+  "A function defined inside another is a helper of its own, as if by letfn.  A
+  value is just its expression."
+  [[_ target & body :as form]]
+  (cond
+    (seq? target) (let [[fname ps inner] (curried target body)]
+                    (list 'letfn [(helper form fname (list* 'lambda ps inner))]))
+    (and (= 1 (count body)) (function-value? (first body)))
+    (list 'letfn [(helper form target (first body))])
+    :else (sequence-of body)))
 
 ;; --- control flow --------------------------------------------------------
 
@@ -145,6 +162,24 @@
   (if (symbol? first-arg)
     (list* 'loop (bindings (first more)) (exprs (rest more)))
     (list* 'let (bindings first-arg) (exprs more))))
+
+(defn- helper-binding?
+  "Does a binding give a name to a function?"
+  [b]
+  (and (seq? b) (symbol? (first b)) (= 2 (count b)) (function-value? (second b))))
+
+(defn- letrec-form
+  "letrec's functions are named helpers, as in a letfn; the rest of its bindings
+  stay a let around its body."
+  [[h bs & body :as form]]
+  (let [fns (when (seq? bs) (filter helper-binding? bs))]
+    (if (empty? fns)
+      (let-form form)
+      (let [others (remove helper-binding? bs)
+            inner (if (seq others)
+                    [(let-form (list* h (apply list others) body))]
+                    (exprs body))]
+        (list* 'letfn (mapv #(helper % (first %) (second %)) fns) inner)))))
 
 (defn- do-form
   "(do bindings (test result...) body...) is a loop that tests before each pass."
@@ -213,7 +248,9 @@
 (def ^:private translators
   (merge
    (zipmap let-heads (repeat let-form))
-   {'quote identity
+   {'letrec letrec-form
+    'letrec* letrec-form
+    'quote identity
     'quasiquote quasiquote-form
     'syntax second-of
     'quasisyntax second-of
@@ -248,10 +285,6 @@
     form))
 
 ;; --- top level -----------------------------------------------------------
-
-(defn- function-value?
-  [value]
-  (and (seq? value) (contains? '#{lambda case-lambda} (first value))))
 
 (defn- let-over-lambda
   "The lambda a value keeps its state around, as in (let ([cache ...]) (lambda ...))."

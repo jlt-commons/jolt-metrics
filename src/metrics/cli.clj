@@ -83,7 +83,9 @@ Prints the report, or writes it to out.
   (core/analyze-dir dir {:changes (when git (git/changes dir days))
                          :days days
                          :exclude (concat (:exclude project-config) exclude)
-                         :test-paths (:test-paths project-config)}))
+                         :test-paths (:test-paths project-config)
+                         :api-namespaces (:api-namespaces project-config)
+                         :api-paths (:api-paths project-config)}))
 
 (defn- report
   "Run the analysis and put the result where it was asked to go."

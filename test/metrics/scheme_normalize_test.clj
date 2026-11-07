@@ -69,11 +69,35 @@
   (is (= ["f"] (map :name (units "(library (a b) (export f) (import (chezscheme)) (define (f) 1))"))))
   (is (= ["f"] (map :name (units "(eval-when (compile) (define (f) 1))")))))
 
-(deftest a-nested-define-is-a-closure
-  (let [u (unit "(define (f a) (define (g b) (if b 1 2)) (g a))")]
-    (is (= [1] (map :params [u])))
-    (is (= [2 2 2] [(:cyclomatic u) (:cognitive u) (:nesting u)]))
-    (is (= 1 (count (units "(define (f a) (define (g b) b) (g a))"))))))
+(deftest a-nested-define-is-its-own-unit
+  (let [[f g :as all] (units "(define (f a)\n  (define (g b) (if b 1 2))\n  (g a))")]
+    (is (= [["f" :function 1] ["f/g" :helper 1]] (map (juxt :name :kind :params) all)))
+    (is (= [1 0 0] [(:cyclomatic f) (:cognitive f) (:nesting f)]) "the helper's if is not the outer's")
+    (is (= [2 1 1] [(:cyclomatic g) (:cognitive g) (:nesting g)]))
+    (is (= 2 (get-in f [:locs :sloc])))
+    (is (= [2 2] [(:line g) (:end-line g)])))
+  (testing "a lambda value, or a case-lambda, is a helper too"
+    (is (= [["f" 1] ["f/g" 2]]
+           (map (juxt :name :cyclomatic) (units "(define (f a) (define g (lambda (b) (if b 1 2))) (g a))"))))
+    (is (= [["f/g" 3 2]]
+           (map (juxt :name :cyclomatic :params)
+                (rest (units "(define (f a) (define g (case-lambda [(b) (if b 1 2)] [(b c) (if c b 2)])) (g a))"))))))
+  (testing "inner helpers nest"
+    (is (= ["f" "f/g" "f/g/h"]
+           (map :name (units "(define (f) (define (g) (define (h x) x) (h 1)) (g))")))))
+  (testing "a value is not a helper"
+    (is (= [["f" 2]] (map (juxt :name :cyclomatic) (units "(define (f a) (define x (if a 1 2)) x)"))))))
+
+(deftest letrec-lambdas-are-their-own-units
+  (doseq [head ["letrec" "letrec*"]]
+    (let [all (units (str "(define (f x) (" head " ([ev? (lambda (n) (if (= n 0) #t (od? (- n 1))))]"
+                          " [od? (lambda (n) (if (= n 0) #f (ev? (- n 1))))]"
+                          " [k (if x 1 2)])"
+                          " (ev? k)))"))]
+      (is (= [["f" 2] ["f/ev?" 2] ["f/od?" 2]] (map (juxt :name :cyclomatic) all)) head)))
+  (testing "a plain let's lambda is anonymous, and a named let a loop"
+    (is (= [["f" 2]] (map (juxt :name :cyclomatic) (units "(define (f x) (let ([g (lambda (n) (if n 1 2))]) (g x)))"))))
+    (is (= ["f"] (map :name (units "(define (f x) (let lp ([i 0]) (lp (+ i 1))))"))))))
 
 ;; --- control flow --------------------------------------------------------
 

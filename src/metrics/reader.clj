@@ -18,7 +18,8 @@
   Cognitive complexity: if/when/condp/case/loops/catch add 1 plus nesting depth; a
   cond is an if/else-if chain and a cond-> a series of ifs; an else-if and a logical
   operator run add a flat 1; try adds nothing; a closure (fn, letfn, reify, proxy)
-  adds nothing but nests what it holds.")
+  adds nothing but nests what it holds.  A letfn's functions are named helpers,
+  measured as units of their own.")
 
 ;; --- reading -------------------------------------------------------------
 
@@ -129,6 +130,11 @@
 
 (declare desugar)
 
+(defn- keeping-meta
+  "rebuilt, with the position of the form it was rebuilt from."
+  [form rebuilt]
+  (if (and (meta form) (coll? rebuilt)) (with-meta rebuilt (meta form)) rebuilt))
+
 (defn- template-part
   "One argument of a template's concat: (list x) is the element x, anything else
   is a ~@ splice, and the spliced expression is code in its own right."
@@ -164,16 +170,19 @@
 
 (defn desugar
   "Undo the reader's expansion of syntax-quote, so a macro's template is measured
-  as written rather than as the seq/concat/list calls it reads into."
+  as written rather than as the seq/concat/list calls it reads into.  A form keeps
+  its position."
   [form]
-  (cond
-    (seq? form) (or (template-collection form)
-                    (when-let [elements (template-elements form)] (apply list elements))
-                    (apply list (map desugar form)))
-    (vector? form) (mapv desugar form)
-    (map? form) (into {} (map (fn [[k v]] [(desugar k) (desugar v)]) form))
-    (set? form) (set (map desugar form))
-    :else form))
+  (keeping-meta
+   form
+   (cond
+     (seq? form) (or (template-collection form)
+                     (when-let [elements (template-elements form)] (apply list elements))
+                     (apply list (map desugar form)))
+     (vector? form) (mapv desugar form)
+     (map? form) (into {} (map (fn [[k v]] [(desugar k) (desugar v)]) form))
+     (set? form) (set (map desugar form))
+     :else form)))
 
 ;; --- the definitions of a file -------------------------------------------
 
@@ -302,10 +311,65 @@
               [form]))
           forms))
 
+;; --- named helpers -------------------------------------------------------
+;;
+;; A letfn's functions have names, so each is measured as a unit of its own,
+;; named owner/helper, and leaves the letfn behind with only its body.  Scheme's
+;; inner defines and letrec lambdas arrive here as letfns too.  An anonymous fn
+;; has nothing to call it by, and stays part of the code around it.
+
+(defn- helper-binding? [b]
+  (and (seq? b) (symbol? (first b))))
+
+(declare lift-helpers)
+
+(defn- lift-all [found forms]
+  (mapv #(lift-helpers found %) forms))
+
+(defn- lift-from-list
+  "A list with the helpers of any letfn in it moved to found."
+  [found form]
+  (let [h (head-name form)]
+    (cond
+      (contains? '#{quote comment} h) form
+      (and (= 'letfn h) (vector? (second form)))
+      (do (vswap! found into (filter helper-binding? (second form)))
+          (list* 'letfn [] (lift-all found (drop 2 form))))
+      :else (apply list (lift-all found form)))))
+
+(defn- lift-helpers
+  "form without its letfn helpers, which are added to the volatile found.  Only the
+  outermost are taken: a helper's own helpers are its business."
+  [found form]
+  (keeping-meta
+   form
+   (cond
+     (seq? form) (lift-from-list found form)
+     (map? form) (into {} (map (fn [[k v]] [(lift-helpers found k) (lift-helpers found v)]) form))
+     (vector? form) (lift-all found form)
+     (set? form) (set (lift-all found form))
+     :else form)))
+
+(defn- with-helpers
+  "A unit with its named helpers taken out of its body, then the helpers as units
+  of their own, and theirs after them.  The unit keeps where its helpers are, so
+  their lines can be left out of its own."
+  [u]
+  (let [found (volatile! [])
+        body (lift-all found (:body u))
+        helpers (for [b @found]
+                  (unit (str (:name u) "/" (first b)) :helper b (split-arities (rest b))))]
+    (cons (assoc u
+                 :body body
+                 :helpers (mapv (juxt :line :column) helpers))
+          (mapcat with-helpers helpers))))
+
 (defn functions
-  "Every measurable definition of a file: [{:name :kind :line :params :body}]."
+  "Every measurable definition of a file, named helpers included:
+  [{:name :kind :line :column :params :body :helpers}]."
   [forms]
-  (map #(update % :body desugar) (mapcat definition-units (top-forms forms))))
+  (mapcat (comp with-helpers #(update % :body desugar))
+          (mapcat definition-units (top-forms forms))))
 
 (defn- ns-form [forms]
   (first (filter #(and (seq? %) (= 'ns (first %))) forms)))
@@ -630,7 +694,7 @@
   [f]
   (let [body (:body f)
         tokens (reduce halstead* {:operators [] :operands []} body)]
-    (assoc (select-keys f [:name :kind :line :column :params :private])
+    (assoc (select-keys f [:name :kind :line :column :params :private :helpers])
            :self-refs (get (symbol-counts [(:form f)]) (:name f) 0)
            :lloc (reduce + 0 (map form-count body))
            :decision-kinds (mapcat decision-kinds body)
