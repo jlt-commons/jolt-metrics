@@ -73,6 +73,14 @@
             {"path" path "changes" changes "complexity" complexity "risk" risk})
           hotspots)))
 
+(defn- unusual-changes [{:keys [unusual-changes]}]
+  (when-let [{:keys [commits changes]} unusual-changes]
+    {"commits" commits
+     "changes" (mapv (fn [{:keys [sha date subject delta z files]}]
+                       {"commit" sha "date" date "subject" subject
+                        "delta" delta "z" z "files" (vec files)})
+                     changes)}))
+
 (defn- unused-require [{:keys [path lib alias refers]}]
   {"path" path "lib" lib "alias" alias "refers" (vec refers)})
 
@@ -109,6 +117,7 @@
     "summary" (summary result)
     "findings" (vec (map-indexed finding (:queue result)))
     "hotspots" (hotspots result)
+    "unusual_changes" (unusual-changes result)
     "cleanup" (cleanup (:cleanup result))
     "errors" (mapv (fn [{:keys [path error]}] {"path" path "error" error}) (:errors result))
     "files" (mapv file-row (sort-by :path (:files result)))

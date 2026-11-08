@@ -2,6 +2,7 @@
   "Render project metrics as a Markdown report: first what to fix, then the
   numbers behind it."
   (:require [clojure.string :as str]
+            [metrics.entropy :as entropy]
             [metrics.queue :as queue]))
 
 (def default-top
@@ -96,6 +97,37 @@
            (str "| File | Changes | Cyclomatic | Risk |\n|---|---|---|---|\n"
                 (apply str (for [{:keys [path changes complexity risk]} hotspots]
                              (str "| " (cell path) " | " changes " | " complexity " | " (fmt risk) " |\n"))))
+           "_none_\n")
+         "\n")))
+
+;; --- unusual changes -----------------------------------------------------
+
+(defn signed
+  "A change for display, with its sign: +6, -2.5."
+  [x]
+  (str (when (pos? x) "+") (fmt x)))
+
+(def unusual-intro
+  "What the unusual changes section shows, said once for every format."
+  (str "Commits whose change to the code's information content, the entropy of "
+       "its words in bits, was more than " (fmt entropy/z-limit)
+       " standard deviations from the commits before them. Usually a feature "
+       "landing, a removal or imported code: worth a closer review."))
+
+(defn render-unusual
+  "The unusual changes, or nothing when there is no history."
+  [{:keys [unusual-changes]}]
+  (when-let [{:keys [commits changes]} unusual-changes]
+    (str "## Unusual changes\n\n"
+         unusual-intro " Of the last " (plural commits "commit")
+         " that changed analyzed code, tests aside.\n\n"
+         (if (seq changes)
+           (str "| Commit | Date | Entropy change | z | Files | Subject |\n"
+                "|---|---|---|---|---|---|\n"
+                (apply str (for [{:keys [sha date delta z files subject]} changes]
+                             (str "| " (subs sha 0 (min 8 (count sha))) " | " date
+                                  " | " (signed delta) " | " (fmt z)
+                                  " | " (count files) " | " (cell subject) " |\n"))))
            "_none_\n")
          "\n")))
 
@@ -225,6 +257,7 @@
         (render-queue queue (or top default-top))
         "\n"
         (render-hotspots result)
+        (render-unusual result)
         (render-cleanup cleanup)
         (render-files files)
         "\n"

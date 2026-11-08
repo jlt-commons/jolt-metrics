@@ -158,6 +158,19 @@
                         [[:td path] (num-cell changes) (num-cell complexity) (num-cell risk)]))
                [:p [:em "none"]]))))
 
+(defn- unusual-section [{:keys [unusual-changes]}]
+  (when-let [{:keys [commits changes]} unusual-changes]
+    (section "unusual" "Unusual changes"
+             [:p report/unusual-intro " Of the last " (plural commits "commit")
+              " that changed analyzed code, tests aside."]
+             (if (seq changes)
+               (table {:class "sortable"} ["Commit" "Date" "Entropy change" "z" "Files" "Subject"]
+                      (for [{:keys [sha date delta z files subject]} changes]
+                        [[:td [:code (subs sha 0 (min 8 (count sha)))]] [:td date]
+                         [:td {:data-value (str (double delta))} (report/signed delta)]
+                         (num-cell z) (num-cell (count files)) [:td subject]]))
+               [:p [:em "none"]]))))
+
 (defn- require-item [{:keys [path lib alias refers]}]
   [:li [:code path] ": " [:code lib]
    (when alias (list " (alias " [:code alias] ")"))
@@ -274,6 +287,7 @@
     (errors-section errors)
     (queue-section queue top)
     (hotspots-section result)
+    (unusual-section result)
     (cleanup-section cleanup)
     (files-section files)
     (architecture-section files edges)

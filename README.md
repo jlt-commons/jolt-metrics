@@ -2,7 +2,8 @@
 
 A code metrics library for Clojure/Jolt and Scheme source, written in Jolt. It computes
 cyclomatic complexity, cognitive complexity, Halstead metrics, the
-maintainability index, and architecture coupling. Its report leads with a ranked
+maintainability index, and architecture coupling, and picks out unusual commits
+from git history. Its report leads with a ranked
 refactoring queue, so an agent or a human can see what to clean up first and why.
 
 Every metric's computation is checked against a
@@ -21,6 +22,7 @@ stated contract, not just unit tests.
 | **Nesting depth** | `metrics.cognitive` | how deeply control structures nest |
 | **Coupling / instability** | `metrics.coupling` | afferent/efferent coupling and instability |
 | **Hotspot risk** | `metrics.hotspot` | how complex a file is and how often it changes |
+| **Unusual changes** | `metrics.entropy` | commits that changed the code's information content far more than usual |
 
 ## Usage
 
@@ -40,7 +42,8 @@ jolt -m metrics.cli --help
 | `--format md\|edn\|json\|html` | from `out`, else `md` | Markdown for reading, EDN with the full result, JSON for tools, HTML to share |
 | `--top N` | 25 | queue entries to show in Markdown and HTML |
 | `--days N` | 90 | how much git history counts as recent churn |
-| `--no-git` | | skip git history, so no churn and no hotspots |
+| `--commits N` | 500 | how many recent commits to check for unusual changes |
+| `--no-git` | | skip git history, so no churn, hotspots or unusual changes |
 | `--exclude GLOB` | | leave out matching files, relative to the directory; can be repeated |
 | `--config FILE` | `<dir>/.jolt-metrics.edn` | the config file |
 
@@ -89,12 +92,14 @@ in either are still checked.
    and what to do about it. Tests aren't queued.
 4. **Hotspots**: complex files that keep changing. Their contents rank higher in
    the queue.
-5. **Cleanup candidates**: unused requires, and functions nothing mentions. Matching
+5. **Unusual changes**: commits that put far more information into the code, or
+   took far more out, than the ones before them. See below.
+6. **Cleanup candidates**: unused requires, and functions nothing mentions. Matching
    is by name and conservative, but runtime lookups and outside callers can't be
    seen, so check public functions before removing them, and name your API
    namespaces in the config to keep them off the list.
-6. **Files** and **Architecture**: the numbers per file, coupling, and dependencies.
-7. **Thresholds**: what the severities mean.
+7. **Files** and **Architecture**: the numbers per file, coupling, and dependencies.
+8. **Thresholds**: what the severities mean.
 
 | Rule | Warning | Critical | Where the limits come from |
 |---|---|---|---|
@@ -113,6 +118,36 @@ Taken literally, the guide's 10 lines flags a quarter of the functions in the
 Clojure projects we measured, while 20 flags about one in ten. These limits are
 rules of thumb rather than research results; even NIST calls the exact number
 "somewhat controversial".
+
+### Unusual changes
+
+This follows Torres, Baltes, Treude and Wagner, [Information-theoretic detection
+of unusual source code changes](https://doi.org/10.1007/s10664-025-10644-y)
+(Empirical Software Engineering, 2025). The source is read as a stream of words:
+identifiers are split where the case changes and at anything that isn't a letter,
+so `createUser` and `create-user` are both `create` and `user`. A file's entropy
+is the Shannon entropy of its word frequencies, in bits, comments included. A
+commit's change is the sum of its files' changes, and its z-score is how many
+standard deviations that sits from the mean change of every commit before it. A
+commit with at least 10 before it and a z-score over 3, either way, is listed,
+most unusual first.
+
+Only files the report measures count, and tests don't, since the paper found test
+and generated code changes to be its false positives. Excluding generated code in
+the config keeps it out here too. History is read along the first-parent line, so
+a merged pull request is judged as one change, and commits that touch no analyzed
+code aren't part of the baseline.
+
+On the paper's 95 Java projects, 58% of the commits this flags were feature work
+maintainers would want to look at, and 83% counting feature removals and porting;
+the rest were mostly removals of dead code, build changes and file conversions.
+Large swings are mostly features landing, rarely bugs: treat the list as where to
+look closer in review, not as defects. The paper got its best precision by keeping
+all history as the baseline rather than a recent window, which is why every commit
+in the `--commits` range counts.
+
+Reading history costs a few seconds for 500 commits on a typical project; it
+grows with the size of the files the commits touch.
 
 ### JSON
 
@@ -133,6 +168,7 @@ where EDN is 130 KB.
 | `summary` | `critical`, `warnings`, `files`, `files_not_analyzed`, `loc`, `sloc`, `cloc`, `functions`, `cyclomatic_total`, `cyclomatic_avg`, `cognitive_total`, `maintainability_avg`, `instability_avg` |
 | `findings` | the whole queue, worst first and never capped by `--top`: `rank`, `severity`, `kind`, `name`, `path`, `line`, `end_line`, `changes`, `score`, `metrics`, `violations` (`rule`, `value`, `limit`, `band`), `actions` |
 | `hotspots` | `path`, `changes`, `complexity`, `risk`; `null` under `--no-git` |
+| `unusual_changes` | `commits` (how many were checked) and `changes`, most unusual first: `commit`, `date`, `subject`, `delta` (bits), `z`, `files`; `null` under `--no-git` |
 | `cleanup` | `unused_requires` (`path`, `lib`, `alias`, `refers`), `unused_private` and `unreferenced_public` (`path`, `name`, `line`) |
 | `errors` | `path`, `error` for each file not analyzed |
 | `files` | `path`, `language`, `namespace`, `loc`, `sloc`, `cloc`, `cyclomatic`, `cognitive`, `maintainability`, `efferent`, `afferent`, `instability`, `instability_band`, `changes` |
@@ -149,7 +185,7 @@ one JSON can't hold (NaN, infinity) is `null`.
 `--format html` writes one file that opens anywhere: the Markdown report's sections
 as tables, with the CSS and script inline and nothing fetched, so it can be emailed
 or dropped in a chat. Light and dark follow the system, and a theme button switches
-them. The script sorts the Files, Coupling and Hotspots tables by any column,
+them. The script sorts the Files, Coupling, Hotspots and Unusual changes tables by any column,
 filters files by path and the queue by severity, collapses sections, and has a
 **Download JSON** button. The page embeds the same lean JSON, so whoever gets the
 file has the data too. Without the script every table is still there; only the
@@ -175,6 +211,9 @@ controls are hidden.
 ;; churn makes hotspots
 (core/analyze-dir "src" {:changes (git/changes "src" 90) :days 90})
 
+;; each commit's entropy change makes unusual changes
+(core/analyze-dir "src" {:history (git/history "src" 500 #(core/code-path? "src" {} %))})
+
 ;; the Markdown report
 (report/render result)
 
@@ -184,8 +223,8 @@ controls are hidden.
 (html/render result {:top 25})
 ```
 
-A result has `:files`, `:errors`, `:edges`, `:summary`, `:queue`, `:hotspots` and
-`:cleanup`. Each file carries `:loc`, `:cyclomatic`, `:cognitive`, `:halstead`,
+A result has `:files`, `:errors`, `:edges`, `:summary`, `:queue`, `:hotspots`,
+`:unusual-changes` and `:cleanup`. Each file carries `:loc`, `:cyclomatic`, `:cognitive`, `:halstead`,
 `:maintainability-index-without-comments`, `:functions` (per-definition metrics),
 and the coupling fields `:efferent-coupling`, `:afferent-coupling`, `:instability`,
 `:instability-band`.
@@ -198,7 +237,8 @@ The pipeline keeps the metric math pure and swappable over different parsers:
 source ──► normalized model ──► pure metric visitors ──► queue ──► report
   (reader, scanner)             halstead, mi, loc,       (queue,   (report)
                                 cyclomatic, cognitive,   cleanup)
-                                coupling, hotspot
+                                coupling, hotspot,
+                                entropy
 ```
 
 - **`metrics.reader`** parses Clojure/Jolt forms into a normalized model: each
@@ -214,7 +254,8 @@ source ──► normalized model ──► pure metric visitors ──► queue
 - **`metrics.core`** orchestrates: parse, compute per-definition and per-file
   metrics, resolve coupling across files, and roll the project up.
 - **`metrics.queue`** and **`metrics.cleanup`** turn the numbers into work.
-- **`metrics.git`** reads churn. It is the only part that shells out.
+- **`metrics.git`** reads churn and each commit's entropy change. It is the only
+  part that shells out.
 - **`metrics.report`** renders Markdown, **`metrics.json`** the lean JSON, and
   **`metrics.html`** the HTML page, inlining `resources/metrics/html/report.css`
   and `report.js`.
