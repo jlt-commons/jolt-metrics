@@ -3,8 +3,8 @@ name: jolt-metrics
 description: >-
   Use when working in the jolt-metrics library: a Jolt code-metrics library
   that computes LOC, cyclomatic and cognitive complexity, Halstead metrics,
-  the maintainability index, and architecture coupling over Clojure/Jolt and
-  Scheme source, and renders a report led by a ranked refactoring queue. Covers adding
+  the maintainability index, architecture coupling and unusual commits over
+  Clojure/Jolt and Scheme source, and renders a report led by a ranked refactoring queue. Covers adding
   or changing a metric (write its writ spec first, then the pure implementation),
   the normalized model, the reader and scanner, and the coupling, queue and
   report pipeline.
@@ -25,6 +25,7 @@ source ──► normalized model ──► pure metric visitors ──► queue
                                 cognitive.clj
                                 coupling.clj
                                 hotspot.clj, rules.clj
+                                entropy.clj (unusual changes)
                                 loc.clj (over scanner's line classes)
 ```
 
@@ -41,7 +42,9 @@ source ──► normalized model ──► pure metric visitors ──► queue
 - **`metrics.paths`** handles globs and resolving loaded files; **`metrics.config`**
   reads `.jolt-metrics.edn`.
 - **`metrics.queue`** holds the thresholds and ranks the findings; **`metrics.cleanup`**
-  finds what looks unused; **`metrics.git`** reads churn and is the only shell-out.
+  finds what looks unused; **`metrics.git`** reads churn and per-commit entropy
+  changes, and is the only shell-out. It reads blobs as bytes and decodes them
+  itself: Jolt's `sh` ignores `:out-enc` and always decodes UTF-8.
 - **`metrics.report`** renders Markdown; **`metrics.json`** the lean, versioned JSON
   for tools (snake_case keys, always present; bump `schema-version` when a key goes
   or changes meaning); **`metrics.html`** one self-contained page that inlines
@@ -108,7 +111,7 @@ are switches: see the `tree-builders` in `metrics.reader`.
 - `jolt -M:test` — run all writ specs + reader tests; `-M:test:dev` swaps in a
   sibling `../writ` checkout.
 - `jolt -m metrics.cli <dir> [out] [--format md|edn|json|html] [--top N] [--days N]
-  [--no-git] [--exclude GLOB] [--config FILE]` — the report; without `--format`, out's
+  [--commits N] [--no-git] [--exclude GLOB] [--config FILE]` — the report; without `--format`, out's
   extension picks it.
 
 Note: running `jolt -M:test` relies on `:main-opts` in `deps.edn`; do not

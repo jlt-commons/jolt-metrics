@@ -23,7 +23,9 @@ Prints the report, or writes it to out.
                     html to share (default md, or from out's extension)
   --top N           Queue entries to show in Markdown and HTML (default 25)
   --days N          How much git history counts as recent churn (default 90)
-  --no-git          Skip git history: no churn and no hotspots
+  --commits N       How many recent commits to check for unusual changes
+                    (default 500)
+  --no-git          Skip git history: no churn, hotspots or unusual changes
   --exclude GLOB    Leave out matching files, relative to <dir>; can be repeated
   --config FILE     The config file (default <dir>/.jolt-metrics.edn)
   -h, --help        Show this")
@@ -35,7 +37,7 @@ Prints the report, or writes it to out.
     (parse-long text)))
 
 (def ^:private default-options
-  {:days 90 :git true :top report/default-top :paths []})
+  {:days 90 :commits 500 :git true :top report/default-top :paths []})
 
 (def ^:private formats #{"md" "edn" "json" "html"})
 
@@ -49,6 +51,7 @@ Prints the report, or writes it to out.
                :parse #(when (contains? formats %) (keyword %))
                :error "--format takes md, edn, json or html"}
    "--days" {:key :days :parse count-value :error "--days takes a number"}
+   "--commits" {:key :commits :parse count-value :error "--commits takes a number"}
    "--top" {:key :top :parse count-value :error "--top takes a number"}
    "--exclude" {:key :exclude :parse identity :many true :error "--exclude takes a glob"}
    "--config" {:key :config :parse identity :error "--config takes a file"}})
@@ -99,13 +102,16 @@ Prints the report, or writes it to out.
 
 (defn- analyze
   "Analyze dir, with the flags adding to what the config says."
-  [dir project-config {:keys [git days exclude]}]
-  (core/analyze-dir dir {:changes (when git (git/changes dir days))
-                         :days days
-                         :exclude (concat (:exclude project-config) exclude)
-                         :test-paths (:test-paths project-config)
-                         :api-namespaces (:api-namespaces project-config)
-                         :api-paths (:api-paths project-config)}))
+  [dir project-config {:keys [git days commits exclude]}]
+  (let [opts {:days days
+              :exclude (concat (:exclude project-config) exclude)
+              :test-paths (:test-paths project-config)
+              :api-namespaces (:api-namespaces project-config)
+              :api-paths (:api-paths project-config)}]
+    (core/analyze-dir dir (assoc opts
+                                 :changes (when git (git/changes dir days))
+                                 :history (when git
+                                            (git/history dir commits #(core/code-path? dir opts %)))))))
 
 (defn- report
   "Run the analysis and put the result where it was asked to go."

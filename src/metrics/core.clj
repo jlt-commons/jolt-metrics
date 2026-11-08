@@ -15,6 +15,7 @@
             [metrics.hotspot :as hotspot]
             [metrics.queue :as queue]
             [metrics.cleanup :as cleanup]
+            [metrics.entropy :as entropy]
             [jolt.fs :as fs]))
 
 (defn- average
@@ -185,6 +186,23 @@
   "The directories whose code is tests unless a project says otherwise."
   ["test" "tests"])
 
+(defn code-path?
+  "Is path, as the analyzer writes it, code that analyze-dir would measure under
+  root, given :exclude and :test-paths, and not a test?"
+  [root {:keys [exclude test-paths]} path]
+  (let [rel (paths/relative root path)]
+    (boolean (and (language/of path)
+                  (not (paths/excluded? exclude rel))
+                  (not (paths/test-file? (or test-paths default-test-paths) rel))))))
+
+(defn- unusual-changes
+  "The commits of a history that changed the code's entropy unusually, and how
+  many commits it held; nil without one."
+  [history]
+  (when history
+    {:commits (count history)
+     :changes (entropy/unusual-changes history)}))
+
 (defn- mark-test-file
   "Everything defined in a test file is test code, helpers included, so it isn't
   queued or called unused."
@@ -267,8 +285,9 @@
 (defn- analyze-loaded
   "The whole result for [path load-source] pairs.  With :changes, a map of path to
   commit count over the last :days days, it also has churn: hotspots, and a queue
-  that puts them first."
-  [loaders {:keys [changes days root test-paths] :as opts}]
+  that puts them first.  With :history, each commit's entropy change as
+  metrics.git/history gives it, it has the unusual ones."
+  [loaders {:keys [changes days root test-paths history] :as opts}]
   (let [{:keys [files errors]} (load-all loaders)
         edges (dependency-edges files root)
         files (annotated-files files edges changes #(mark-test-file % root test-paths))
@@ -282,13 +301,15 @@
      :days (when changes days)
      :hotspots (queue/hotspots files risk-of)
      :queue (queue/build files risk-of)
+     :unusual-changes (unusual-changes history)
      :cleanup (cleanup/candidates-of files (select-keys opts [:root :api-namespaces :api-paths]))}))
 
 (defn analyze-files
   "Analyze a collection of [path source] pairs and resolve coupling between them.
-  opts can have :changes and :days for churn, :root and :test-paths to say what
-  is test code, and :api-namespaces and :api-paths, namespace names or globs and
-  path globs of files whose public functions are API and so never unused."
+  opts can have :changes and :days for churn, :history for unusual changes,
+  :root and :test-paths to say what is test code, and :api-namespaces and
+  :api-paths, namespace names or globs and path globs of files whose public
+  functions are API and so never unused."
   ([file-sources] (analyze-files file-sources nil))
   ([file-sources opts]
    (analyze-loaded (map (fn [[p s]] [p (constantly s)]) file-sources) opts)))
