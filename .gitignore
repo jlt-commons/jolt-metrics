@@ -11,6 +11,10 @@
 
 # build output
 .target/
+/jolt-metrics
+/jolt-metrics.exe
+/jolt-metrics.build/
+/jolt-metrics.exe.build/
 
 # writ proof cache
 .writ-cache/

@@ -1,6 +1,7 @@
 (ns metrics.cli
   "Command-line entry point.
 
+    jolt-metrics <dir> [out] [options]
     jolt -m metrics.cli <dir> [out] [options]
 
   Exits 2 on bad usage or when <dir> does not exist.  A file that cannot be read
@@ -15,7 +16,8 @@
             [jolt.fs :as fs]))
 
 (def usage
-  "Usage: jolt -m metrics.cli <dir> [out] [options]
+  "Usage: jolt-metrics <dir> [out] [options]
+   or: jolt -m metrics.cli <dir> [out] [options]
 
 Prints the report, or writes it to out.
 
