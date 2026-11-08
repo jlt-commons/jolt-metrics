@@ -1,6 +1,7 @@
 (ns metrics.cli-test
   "The command line: exit codes and where the output goes."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.data.json]
+            [clojure.test :refer [deftest is]]
             [clojure.string :as str]
             [metrics.cli :as cli]
             [jolt.fs :as fs]))
@@ -46,12 +47,39 @@
   (is (= 2 (:exit (cli/run ["src" "--format" "xml"]))))
   (is (= 2 (:exit (cli/run ["src" "--bogus"]))))
   (is (= 2 (:exit (cli/run ["src" "--days" "soon"]))))
-  (is (= 2 (:exit (cli/run ["src" "--top"])))))
+  (is (= 2 (:exit (cli/run ["src" "--top"]))))
+  (is (= 2 (:exit (cli/run ["src" "--format" "pdf"]))))
+  (is (= 2 (:exit (cli/run ["src" "--format"])))))
 
 (deftest help-is-not-an-error
   (let [{:keys [exit out]} (cli/run ["--help"])]
     (is (= 0 exit))
     (is (str/includes? out "--format"))))
+
+(deftest json-output-reads-back
+  (let [{:keys [exit out]} (cli/run ["src" "--format" "json" "--no-git"])
+        data (clojure.data.json/read-str out)]
+    (is (= 0 exit))
+    (is (= 1 (get data "schema_version")))
+    (is (nil? (get data "hotspots")))))
+
+(deftest html-output-is-a-page
+  (let [{:keys [exit out]} (cli/run ["src" "--format" "html" "--no-git"])]
+    (is (= 0 exit))
+    (is (str/starts-with? out "<!doctype html>"))))
+
+(deftest the-output-extension-picks-the-format
+  (let [dir (str (fs/create-temp-dir))]
+    (doseq [[file prefix] [["r.html" "<!doctype html>"] ["r.HTM" "<!doctype html>"]
+                           ["r.json" "{"] ["r.edn" "{:"] ["r.md" "# Code Metrics Report"]
+                           ["r.txt" "# Code Metrics Report"]]]
+      (is (zero? (:exit (cli/run ["src" (str dir "/" file) "--no-git"]))) file)
+      (is (str/starts-with? (slurp (str dir "/" file)) prefix) file))))
+
+(deftest an-explicit-format-beats-the-extension
+  (let [path (str (fs/create-temp-dir) "/r.html")]
+    (cli/run ["src" path "--format" "md" "--no-git"])
+    (is (str/starts-with? (slurp path) "# Code Metrics Report"))))
 
 ;; --- exclusions and the config file ----------------------------------------
 
