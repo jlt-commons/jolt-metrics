@@ -20,8 +20,8 @@ computation is checked against a writ spec, not just unit tests.
 ```
 source ──► normalized model ──► pure metric visitors ──► queue ──► report
   reader.clj, scanner.clj       halstead.clj             queue.clj  report.clj
-                                maintainability.clj      cleanup.clj
-                                cyclomatic.clj
+                                maintainability.clj      cleanup.clj json.clj
+                                cyclomatic.clj                      html.clj
                                 cognitive.clj
                                 coupling.clj
                                 hotspot.clj, rules.clj
@@ -42,7 +42,12 @@ source ──► normalized model ──► pure metric visitors ──► queue
   reads `.jolt-metrics.edn`.
 - **`metrics.queue`** holds the thresholds and ranks the findings; **`metrics.cleanup`**
   finds what looks unused; **`metrics.git`** reads churn and is the only shell-out.
-- **`metrics.report`** renders Markdown; **`metrics.cli`** is the entry point.
+- **`metrics.report`** renders Markdown; **`metrics.json`** the lean, versioned JSON
+  for tools (snake_case keys, always present; bump `schema-version` when a key goes
+  or changes meaning); **`metrics.html`** one self-contained page that inlines
+  `resources/metrics/html/report.{css,js}` and embeds the JSON with `<` escaped.
+  All text in `metrics.html` goes through its escaping `markup`; only `raw` skips
+  it, so never wrap user data in `raw`. **`metrics.cli`** is the entry point.
 
 **Languages stay separate.** The pipeline only sees an adapter from
 `metrics.language`: `:parse` (text to forms in the walker's shapes, plus dependencies)
@@ -100,8 +105,9 @@ are switches: see the `tree-builders` in `metrics.reader`.
 ## Commands
 
 - `jolt -M:test:dev` — run all writ specs + reader tests.
-- `jolt -m metrics.cli <dir> [out] [--format md|edn] [--top N] [--days N] [--no-git]
-  [--exclude GLOB] [--config FILE]` — the report.
+- `jolt -m metrics.cli <dir> [out] [--format md|edn|json|html] [--top N] [--days N]
+  [--no-git] [--exclude GLOB] [--config FILE]` — the report; without `--format`, out's
+  extension picks it.
 
 Note: running `jolt -M:test:dev` relies on `:main-opts` in `deps.edn`; do not
 also pass `-m metrics.runner` on the CLI, or it leaks into the runner's args.

@@ -29,18 +29,25 @@ stated contract, not just unit tests.
 ```console
 jolt -m metrics.cli src                # print the Markdown report
 jolt -m metrics.cli src report.md      # write it to a file
-jolt -m metrics.cli src --format edn   # every finding, as data
+jolt -m metrics.cli src report.html    # one page to share; the extension picks the format
+jolt -m metrics.cli src --format json  # the lean report, for tools and LLMs
+jolt -m metrics.cli src --format edn   # the full result, as data
 jolt -m metrics.cli --help
 ```
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--format md\|edn` | `md` | Markdown for reading, EDN with every finding |
-| `--top N` | 25 | queue entries to show in Markdown |
+| `--format md\|edn\|json\|html` | from `out`, else `md` | Markdown for reading, EDN with the full result, JSON for tools, HTML to share |
+| `--top N` | 25 | queue entries to show in Markdown and HTML |
 | `--days N` | 90 | how much git history counts as recent churn |
 | `--no-git` | | skip git history, so no churn and no hotspots |
 | `--exclude GLOB` | | leave out matching files, relative to the directory; can be repeated |
 | `--config FILE` | `<dir>/.jolt-metrics.edn` | the config file |
+
+Without `--format`, the output file's extension picks the format: `.md`, `.edn`,
+`.json`, `.html` or `.htm`, in any case. Any other extension, or no output file,
+means Markdown, and `--format` always wins. Up to v0.1.2, `report.edn` without
+`--format` got Markdown; it now gets EDN.
 
 The command exits 2 on bad usage or a missing directory. A file that can't be read
 doesn't fail the run; the report lists it under `Files not analyzed`. Reading never
@@ -107,6 +114,47 @@ Clojure projects we measured, while 20 flags about one in ten. These limits are
 rules of thumb rather than research results; even NIST calls the exact number
 "somewhat controversial".
 
+### JSON
+
+`--format json` is the lean report: what to act on, in a shape tools can rely on.
+It leaves out what EDN has for Clojure users (per-function numbers for functions
+that break nothing, Halstead detail, imports). On this repository it's about 10 KB
+where EDN is 130 KB.
+
+```json
+{"tool": "jolt-metrics", "schema_version": 1,
+ "summary": {...}, "findings": [...], "hotspots": [...], "cleanup": {...},
+ "errors": [...], "files": [...], "dependencies": [...]}
+```
+
+| Key | Holds |
+|---|---|
+| `schema_version` | 1; it goes up when a key is removed or changes meaning |
+| `summary` | `critical`, `warnings`, `files`, `files_not_analyzed`, `loc`, `sloc`, `cloc`, `functions`, `cyclomatic_total`, `cyclomatic_avg`, `cognitive_total`, `maintainability_avg`, `instability_avg` |
+| `findings` | the whole queue, worst first and never capped by `--top`: `rank`, `severity`, `kind`, `name`, `path`, `line`, `end_line`, `changes`, `score`, `metrics`, `violations` (`rule`, `value`, `limit`, `band`), `actions` |
+| `hotspots` | `path`, `changes`, `complexity`, `risk`; `null` under `--no-git` |
+| `cleanup` | `unused_requires` (`path`, `lib`, `alias`, `refers`), `unused_private` and `unreferenced_public` (`path`, `name`, `line`) |
+| `errors` | `path`, `error` for each file not analyzed |
+| `files` | `path`, `language`, `namespace`, `loc`, `sloc`, `cloc`, `cyclomatic`, `cognitive`, `maintainability`, `efferent`, `afferent`, `instability`, `instability_band`, `changes` |
+| `dependencies` | `from`, `to` |
+
+Keys are snake_case and always present, and so are values that were keywords
+(`"file_lines"`). Lists are empty, never missing. A function finding's `metrics` has
+`cyclomatic`, `cognitive`, `nesting`, `lines`, `params` and `maintainability`; a
+file finding's is `null`. Numbers that aren't whole are rounded to 3 decimals, and
+one JSON can't hold (NaN, infinity) is `null`.
+
+### HTML
+
+`--format html` writes one file that opens anywhere: the Markdown report's sections
+as tables, with the CSS and script inline and nothing fetched, so it can be emailed
+or dropped in a chat. Light and dark follow the system, and a theme button switches
+them. The script sorts the Files, Coupling and Hotspots tables by any column,
+filters files by path and the queue by severity, collapses sections, and has a
+**Download JSON** button. The page embeds the same lean JSON, so whoever gets the
+file has the data too. Without the script every table is still there; only the
+controls are hidden.
+
 ### API
 
 ```clojure
@@ -129,6 +177,11 @@ rules of thumb rather than research results; even NIST calls the exact number
 
 ;; the Markdown report
 (report/render result)
+
+;; the lean JSON and the HTML page
+(require '[metrics.json :as json] '[metrics.html :as html])
+(json/render result)   ; text; (json/report result) is the same as data
+(html/render result {:top 25})
 ```
 
 A result has `:files`, `:errors`, `:edges`, `:summary`, `:queue`, `:hotspots` and
@@ -162,7 +215,9 @@ source ──► normalized model ──► pure metric visitors ──► queue
   metrics, resolve coupling across files, and roll the project up.
 - **`metrics.queue`** and **`metrics.cleanup`** turn the numbers into work.
 - **`metrics.git`** reads churn. It is the only part that shells out.
-- **`metrics.report`** renders Markdown.
+- **`metrics.report`** renders Markdown, **`metrics.json`** the lean JSON, and
+  **`metrics.html`** the HTML page, inlining `resources/metrics/html/report.css`
+  and `report.js`.
 
 A definition is a `defn`, `defn-`, `defmacro`, `defmethod`, `deftest`, a method of
 `defrecord`, `deftype`, `extend-type` or `extend-protocol`, or a `def`, `defonce` or
