@@ -366,3 +366,10 @@ report files attached. The release is refused when the version isn't `vX.Y.Z`, w
 the tag or release already exists, when a manual run isn't on `main`, or when the
 commit isn't on `main`. A tag pushed with failing tests stays a plain tag with no
 release.
+
+## Licence
+
+Copyright (c) 2026 Dmitri Sotnikov and Burin Choomnuan.
+
+Distributed under the [Eclipse Public License 2.0](LICENSE). SPDX identifier:
+`EPL-2.0`.
