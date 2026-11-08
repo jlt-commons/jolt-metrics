@@ -218,6 +218,17 @@
              {:path "a.clj" :lib "b.refd" :refers ["y"]}}
            (set unused-requires)))))
 
+(deftest a-used-refer-keeps-the-require-and-its-alias
+  (let [{:keys [unused-requires]}
+        (cleanup "a.clj" "(ns a (:require [b.s :as s :refer [join]] [b.t :as t :refer [is deftest]] [b.all :as all :refer :all]))
+                          (defn f [xs] (join xs) (is xs))")]
+    (is (= #{{:path "a.clj" :lib "b.t" :refers ["deftest"]}}
+           (set unused-requires)))))
+
+(deftest an-alias-and-refers-all-unused-are-listed-together
+  (is (= [{:path "a.clj" :lib "b.s" :alias "s" :refers ["join"]}]
+         (:unused-requires (cleanup "a.clj" "(ns a (:require [b.s :as s :refer [join]])) (def v 1)")))))
+
 (deftest alias-keywords-and-namespaced-maps-count-as-use
   (let [{:keys [unused-requires]}
         (cleanup "a.clj" "(ns a (:require [b :as k] [c :as m] [e :as t])) (def v ::k/x) (def w #::m{:a 1}) (defmacro q [] `(t/f))")]

@@ -106,7 +106,9 @@ in either are still checked.
    the queue.
 5. **Unusual changes**: commits that put far more information into the code, or
    took far more out, than the ones before them. See below.
-6. **Cleanup candidates**: unused requires, and functions nothing mentions. Matching
+6. **Cleanup candidates**: unused requires, and functions nothing mentions. A
+   require counts as used when anything it brings in is, so an idle alias beside a
+   used `:refer` isn't listed, while referred names nobody uses are. Matching
    is by name and conservative, but runtime lookups and outside callers can't be
    seen, so check public functions before removing them, and name your API
    namespaces in the config to keep them off the list.
