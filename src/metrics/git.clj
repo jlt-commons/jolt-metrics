@@ -29,6 +29,24 @@
         (parse-log dir out)))
     (catch Throwable _ nil)))
 
+(defn parse-ignored
+  "The paths of a NUL-separated `git ls-files` listing."
+  [text]
+  (vec (remove str/blank? (str/split text #"\u0000"))))
+
+(defn ignored
+  "What git ignores under dir, relative to it: files, and directories with a
+  trailing slash standing for all they hold.  Tracked files are never in it,
+  whatever the patterns say.  nil outside a repository or without git."
+  [dir]
+  (try
+    (let [{:keys [exit out]} (shell/sh "git" "-c" "core.quotePath=false" "-C" dir
+                                       "ls-files" "-z" "--others" "--ignored"
+                                       "--exclude-standard" "--directory")]
+      (when (zero? exit)
+        (parse-ignored out)))
+    (catch Throwable _ nil)))
+
 ;; --- entropy history ---------------------------------------------------------
 
 (def ^:private null-oid #"0+")

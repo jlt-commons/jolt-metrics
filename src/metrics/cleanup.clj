@@ -68,13 +68,25 @@
                            (<= (other-references symbols f) 0))]
             (function-entry file f))))))
 
+(defn- refers-in-use?
+  "Does the file use a name the libspec refers?  :refer :all can't be judged, so
+  it counts as use."
+  [{:keys [symbols]} {:keys [refer only]}]
+  (let [named (or refer only)]
+    (boolean (or (= :all named)
+                 (and (sequential? named) (some #(contains? symbols (str %)) named))))))
+
 (defn- dead-alias
-  "The alias a libspec declares, if the file refers through neither it nor the lib."
-  [{:keys [qualifiers]} {:keys [lib as as-alias]}]
+  "The alias a libspec declares, if the file uses the lib through none of it: not
+  the alias, not the lib's own name, and none of the names it refers.  A lib in
+  use through its refers isn't one to remove, and an idle alias beside them
+  (`[clojure.test :as t :refer [is]]`) is too minor to list."
+  [{:keys [qualifiers] :as file} {:keys [lib as as-alias] :as spec}]
   (let [local (or as as-alias)]
     (when (and local
                (not (contains? qualifiers (str local)))
-               (not (contains? qualifiers (str lib))))
+               (not (contains? qualifiers (str lib)))
+               (not (refers-in-use? file spec)))
       (str local))))
 
 (defn- dead-refers

@@ -19,6 +19,12 @@
 (deftest outside-a-repository-there-is-no-history
   (is (nil? (git/changes "/" 90))))
 
+(deftest parse-ignored-splits-on-nul
+  (is (= ["target/" "src/a b.clj"] (git/parse-ignored "target/\u0000src/a b.clj\u0000"))))
+
+(deftest outside-a-repository-nothing-is-ignored
+  (is (nil? (git/ignored "/"))))
+
 (def ^:private raw-log
   (str "\u0000aaa\t2025-01-02\tAdd b\n\n"
        ":000000 100644 0000000000000000000000000000000000000000 b1 A\tb.clj\n"

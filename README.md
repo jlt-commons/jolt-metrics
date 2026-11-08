@@ -56,6 +56,7 @@ jolt -m metrics.cli --help
 | `--days N` | 90 | how much git history counts as recent churn |
 | `--commits N` | 500 | how many recent commits to check for unusual changes |
 | `--no-git` | | skip git history, so no churn, hotspots or unusual changes |
+| `--no-gitignore` | | analyze files git ignores too; they're left out by default |
 | `--exclude GLOB` | | leave out matching files, relative to the directory; can be repeated |
 | `--config FILE` | `<dir>/.jolt-metrics.edn` | the config file |
 
@@ -82,8 +83,13 @@ directory:
 
 Patterns are relative to that directory, and `--exclude` adds to the list. `*` stays
 within a directory, `**` crosses them, and a bare directory covers its contents.
-Nothing is excluded by default, so vendored and generated code counts until you say
-otherwise. Files under `:test-paths` (by default `test` and `tests`, as a directory
+Inside a git repository, what git ignores is left out by default: build output
+like `target/` and anything else your `.gitignore` files, `.git/info/exclude` or
+global excludes name. A tracked file always counts, whatever the patterns say, and
+`--no-gitignore` turns this off. It works with `--no-git` too, which only skips the
+history. Outside a repository, or when git isn't installed, every file is read.
+Nothing else is excluded by default, so vendored and generated code that git tracks
+counts until you say otherwise. Files under `:test-paths` (by default `test` and `tests`, as a directory
 at any depth, or a glob) are test code: they're measured, but not queued or called
 unused.
 
@@ -106,7 +112,9 @@ in either are still checked.
    the queue.
 5. **Unusual changes**: commits that put far more information into the code, or
    took far more out, than the ones before them. See below.
-6. **Cleanup candidates**: unused requires, and functions nothing mentions. Matching
+6. **Cleanup candidates**: unused requires, and functions nothing mentions. A
+   require counts as used when anything it brings in is, so an idle alias beside a
+   used `:refer` isn't listed, while referred names nobody uses are. Matching
    is by name and conservative, but runtime lookups and outside callers can't be
    seen, so check public functions before removing them, and name your API
    namespaces in the config to keep them off the list.

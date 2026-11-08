@@ -58,6 +58,15 @@
   [globs path]
   (boolean (some #(glob-match? % path) globs)))
 
+(defn ignored?
+  "Is a path relative to the root one of the entries, or under one that names a
+  directory with a trailing slash?  Entries are literal paths, as git lists them."
+  [entries path]
+  (boolean (some #(if (str/ends-with? % "/")
+                    (str/starts-with? path %)
+                    (= % path))
+                 entries)))
+
 (defn- plain-name? [pattern]
   (not (re-find #"[*?/]" pattern)))
 
