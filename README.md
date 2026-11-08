@@ -336,11 +336,14 @@ in a cycle.
 ## Tests
 
 ```console
-jolt -M:test:dev
+jolt -M:test                      # everything
+jolt -M:test metrics.json-test    # only the namespaces named
 ```
 
 Runs every writ spec and the reader behaviour tests. Specs are discovered by
-directory scan; add a `*_spec.clj` file and it is picked up.
+directory scan; add a `*_spec.clj` file and it is picked up. To try specs against
+a writ checkout next to this one (`../writ`) instead of the pinned version, add the
+`:dev` alias: `jolt -M:test:dev`.
 
 `self_test.clj` runs the report on `src` and fails if anything is queued, so a
 change that crosses a threshold has to refactor or argue the threshold down.

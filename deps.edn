@@ -6,6 +6,7 @@
                        {:git/url "https://github.com/jlt-commons/writ"
                         :git/sha "11ea31dfd4f261332df3b227c37c962e30eefb4e"}}
          :main-opts   ["-m" "metrics.runner"]}
-  ;; local checkout of writ, for iterating on specs without a fetch
+  ;; a writ checkout next to this one (../writ), for iterating on specs
+  ;; without a fetch: jolt -M:test:dev
   :dev {:override-deps {io.github.jlt-commons/writ
-                        {:local/root "/Users/yogthos/src/jlt-commons/writ"}}}}}
+                        {:local/root "../writ"}}}}}

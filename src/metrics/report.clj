@@ -1,7 +1,8 @@
 (ns metrics.report
   "Render project metrics as a Markdown report: first what to fix, then the
   numbers behind it."
-  (:require [metrics.queue :as queue]))
+  (:require [clojure.string :as str]
+            [metrics.queue :as queue]))
 
 (def default-top
   "How many queue entries to show; EDN output always has them all."
@@ -16,6 +17,11 @@
     :else (let [d (double x)
                 r (/ (Math/round (* 10.0 d)) 10.0)]
             (str r))))
+
+(defn- cell
+  "Text for a table cell: a | would end the cell early, so it is escaped."
+  [s]
+  (str/replace (str s) "|" "\\|"))
 
 ;; --- the queue -----------------------------------------------------------
 
@@ -89,7 +95,7 @@
          (if (seq hotspots)
            (str "| File | Changes | Cyclomatic | Risk |\n|---|---|---|---|\n"
                 (apply str (for [{:keys [path changes complexity risk]} hotspots]
-                             (str "| " path " | " changes " | " complexity " | " (fmt risk) " |\n"))))
+                             (str "| " (cell path) " | " changes " | " complexity " | " (fmt risk) " |\n"))))
            "_none_\n")
          "\n")))
 
@@ -160,7 +166,7 @@
        "|---|---|---|---|---|---|---|---|\n"
        (apply str
               (for [f (sort-by :path files)]
-                (str "| " (:path f)
+                (str "| " (cell (:path f))
                      " | " (get-in f [:loc :loc])
                      " | " (get-in f [:loc :sloc])
                      " | " (:cyclomatic f)
@@ -177,7 +183,7 @@
        "|---|---|---|---|---|\n"
        (apply str
               (for [f (sort-by :path files)]
-                (str "| " (:path f)
+                (str "| " (cell (:path f))
                      " | " (:efferent-coupling f)
                      " | " (:afferent-coupling f)
                      " | " (fmt (:instability f))

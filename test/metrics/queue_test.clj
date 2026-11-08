@@ -239,6 +239,11 @@
     (is (re-find #"`big` \(a\.clj:1-28\)" md))
     (is (str/includes? md "**critical**"))))
 
+(deftest a-pipe-in-a-path-stays-in-its-cell
+  (let [md (report/render (core/analyze-files [["src/a|b.clj" "(ns a)"]]))]
+    (is (str/includes? md "| src/a\\|b.clj | "))
+    (is (not (str/includes? md "| src/a|b.clj |")))))
+
 (deftest the-report-says-when-nothing-is-queued
   (is (str/includes? (report/render (core/analyze-files [["a.clj" "(defn f [x] (inc x))"]]))
                      "_nothing over the thresholds_")))

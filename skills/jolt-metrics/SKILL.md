@@ -73,7 +73,8 @@ in a scratch namespace. Keep it that way, since the source is untrusted data.
      public fn, then laws — a model law (`(= (f x) (model x))`) plus worked
      examples and edge cases.
 2. Write the pure implementation `src/metrics/<name>.clj`.
-3. Run `jolt -M:test:dev metrics.<name>-spec` until green.
+3. Run `jolt -M:test metrics.<name>-spec` until green (`-M:test:dev` uses a
+   `../writ` checkout instead of the pinned writ).
 
 writ rules that have cost time here:
 
@@ -104,12 +105,13 @@ are switches: see the `tree-builders` in `metrics.reader`.
 
 ## Commands
 
-- `jolt -M:test:dev` — run all writ specs + reader tests.
+- `jolt -M:test` — run all writ specs + reader tests; `-M:test:dev` swaps in a
+  sibling `../writ` checkout.
 - `jolt -m metrics.cli <dir> [out] [--format md|edn|json|html] [--top N] [--days N]
   [--no-git] [--exclude GLOB] [--config FILE]` — the report; without `--format`, out's
   extension picks it.
 
-Note: running `jolt -M:test:dev` relies on `:main-opts` in `deps.edn`; do not
+Note: running `jolt -M:test` relies on `:main-opts` in `deps.edn`; do not
 also pass `-m metrics.runner` on the CLI, or it leaks into the runner's args.
 
 ## Conventions
