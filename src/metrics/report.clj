@@ -131,6 +131,27 @@
            "_none_\n")
          "\n")))
 
+(def unusual-files-intro
+  "What the unusual files section shows, said once for every format."
+  (str "Files whose words are unusually surprising for this project: the bits each "
+       "word takes, on average, given the words of the other files, more than "
+       (fmt entropy/z-limit) " standard deviations above the files' mean. Often "
+       "vendored, generated or example code, or a concern that belongs elsewhere. "
+       "Tests aside, and files under " entropy/min-words " words."))
+
+(defn render-unusual-files
+  "The files whose vocabulary stands out from the rest."
+  [{:keys [unusual-files]}]
+  (str "## Unusual files\n\n"
+       unusual-files-intro "\n\n"
+       (if (seq unusual-files)
+         (str "| File | Surprisal (bits a word) | z | Words |\n|---|---|---|---|\n"
+              (apply str (for [{:keys [path surprisal z words]} unusual-files]
+                           (str "| " (cell path) " | " (fmt surprisal) " | " (fmt z)
+                                " | " words " |\n"))))
+         "_none_\n")
+       "\n"))
+
 ;; --- cleanup -------------------------------------------------------------
 
 (defn- capped-lines [lines]
@@ -190,7 +211,8 @@
        (str "| Average cyclomatic complexity per function | " (fmt (:avg-cyclomatic summary)) " |\n")
        (str "| Total cognitive complexity | " (:cognitive summary) " |\n")
        (str "| Average maintainability index (comment-free) | " (fmt (:avg-maintainability summary)) " |\n")
-       (str "| Average instability | " (fmt (:avg-instability summary)) " |\n")))
+       (str "| Average instability | " (fmt (:avg-instability summary)) " |\n")
+       (str "| Average entropy per file | " (fmt (:avg-entropy summary)) " |\n")))
 
 (defn render-files [files]
   (str "## Files\n\n"
@@ -258,6 +280,7 @@
         "\n"
         (render-hotspots result)
         (render-unusual result)
+        (render-unusual-files result)
         (render-cleanup cleanup)
         (render-files files)
         "\n"

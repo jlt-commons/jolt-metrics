@@ -3,7 +3,7 @@
 A code metrics library for Clojure/Jolt and Scheme source, written in Jolt. It computes
 cyclomatic complexity, cognitive complexity, Halstead metrics, the
 maintainability index, and architecture coupling, and picks out unusual commits
-from git history. Its report leads with a ranked
+from git history and files whose vocabulary doesn't fit the rest of the project. Its report leads with a ranked
 refactoring queue, so an agent or a human can see what to clean up first and why.
 
 Every metric's computation is checked against a
@@ -23,6 +23,7 @@ stated contract, not just unit tests.
 | **Coupling / instability** | `metrics.coupling` | afferent/efferent coupling and instability |
 | **Hotspot risk** | `metrics.hotspot` | how complex a file is and how often it changes |
 | **Unusual changes** | `metrics.entropy` | commits that changed the code's information content far more than usual |
+| **Entropy / surprisal** | `metrics.entropy` | a file's word entropy, and how unexpected its words are given the rest of the project |
 
 ## Usage
 
@@ -94,12 +95,14 @@ in either are still checked.
    the queue.
 5. **Unusual changes**: commits that put far more information into the code, or
    took far more out, than the ones before them. See below.
-6. **Cleanup candidates**: unused requires, and functions nothing mentions. Matching
+6. **Unusual files**: files whose words are far more surprising than the
+   project's other files'. See below.
+7. **Cleanup candidates**: unused requires, and functions nothing mentions. Matching
    is by name and conservative, but runtime lookups and outside callers can't be
    seen, so check public functions before removing them, and name your API
    namespaces in the config to keep them off the list.
-7. **Files** and **Architecture**: the numbers per file, coupling, and dependencies.
-8. **Thresholds**: what the severities mean.
+8. **Files** and **Architecture**: the numbers per file, coupling, and dependencies.
+9. **Thresholds**: what the severities mean.
 
 | Rule | Warning | Critical | Where the limits come from |
 |---|---|---|---|
@@ -149,6 +152,30 @@ in the `--commits` range counts.
 Reading history costs a few seconds for 500 commits on a typical project; it
 grows with the size of the files the commits touch.
 
+### Unusual files
+
+The same words give a distribution over the files as they are now. Each file has
+its `:entropy`, the Shannon entropy of its words, and the summary has their
+average, which the paper calls the entropy spread: when it keeps climbing, files
+are taking on more concepts rather than new files being made for them.
+
+A file's `:surprisal` is the cross-entropy of its words against the rest of the
+project: the bits each of its words takes, on average, under the word
+distribution of every other file, with one added to each count so a word found
+nowhere else has a finite cost. Raw entropy mostly tracks how big a file is;
+surprisal doesn't, since it's per word. A file whose surprisal is more than 3
+standard deviations above the files' mean is listed. These are files that speak a
+different vocabulary from their project: on babashka, a generated table of XML
+entities and a standalone example; on clj-kondo, a vendored copy of tools.reader.
+Exclude such code in the config once you've seen it, or move a concern that
+belongs elsewhere.
+
+Tests get no surprisal and don't count toward the distribution, and nor do files
+under 50 words, which say too little about their vocabulary. Name fixture
+directories like `test-resources` in `:test-paths` to keep them out. The paper
+proposed cross-entropy as the next measure to try but didn't evaluate it, so
+there's no published precision for this list.
+
 ### JSON
 
 `--format json` is the lean report: what to act on, in a shape tools can rely on.
@@ -165,13 +192,14 @@ where EDN is 130 KB.
 | Key | Holds |
 |---|---|
 | `schema_version` | 1; it goes up when a key is removed or changes meaning |
-| `summary` | `critical`, `warnings`, `files`, `files_not_analyzed`, `loc`, `sloc`, `cloc`, `functions`, `cyclomatic_total`, `cyclomatic_avg`, `cognitive_total`, `maintainability_avg`, `instability_avg` |
+| `summary` | `critical`, `warnings`, `files`, `files_not_analyzed`, `loc`, `sloc`, `cloc`, `functions`, `cyclomatic_total`, `cyclomatic_avg`, `cognitive_total`, `maintainability_avg`, `instability_avg`, `entropy_avg` |
 | `findings` | the whole queue, worst first and never capped by `--top`: `rank`, `severity`, `kind`, `name`, `path`, `line`, `end_line`, `changes`, `score`, `metrics`, `violations` (`rule`, `value`, `limit`, `band`), `actions` |
 | `hotspots` | `path`, `changes`, `complexity`, `risk`; `null` under `--no-git` |
 | `unusual_changes` | `commits` (how many were checked) and `changes`, most unusual first: `commit`, `date`, `subject`, `delta` (bits), `z`, `files`; `null` under `--no-git` |
+| `unusual_files` | `path`, `surprisal` (bits a word), `z`, `words`, most surprising first |
 | `cleanup` | `unused_requires` (`path`, `lib`, `alias`, `refers`), `unused_private` and `unreferenced_public` (`path`, `name`, `line`) |
 | `errors` | `path`, `error` for each file not analyzed |
-| `files` | `path`, `language`, `namespace`, `loc`, `sloc`, `cloc`, `cyclomatic`, `cognitive`, `maintainability`, `efferent`, `afferent`, `instability`, `instability_band`, `changes` |
+| `files` | `path`, `language`, `namespace`, `loc`, `sloc`, `cloc`, `cyclomatic`, `cognitive`, `maintainability`, `efferent`, `afferent`, `instability`, `instability_band`, `changes`, `entropy`, `surprisal` |
 | `dependencies` | `from`, `to` |
 
 Keys are snake_case and always present, and so are values that were keywords
@@ -224,7 +252,8 @@ controls are hidden.
 ```
 
 A result has `:files`, `:errors`, `:edges`, `:summary`, `:queue`, `:hotspots`,
-`:unusual-changes` and `:cleanup`. Each file carries `:loc`, `:cyclomatic`, `:cognitive`, `:halstead`,
+`:unusual-changes`, `:unusual-files` and `:cleanup`. Each file carries `:loc`,
+`:cyclomatic`, `:cognitive`, `:halstead`, `:entropy`, `:surprisal`, `:words`,
 `:maintainability-index-without-comments`, `:functions` (per-definition metrics),
 and the coupling fields `:efferent-coupling`, `:afferent-coupling`, `:instability`,
 `:instability-band`.

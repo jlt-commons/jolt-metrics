@@ -88,7 +88,8 @@
      ["Average cyclomatic complexity per function" (:avg-cyclomatic summary)]
      ["Total cognitive complexity" (:cognitive summary)]
      ["Average maintainability index (comment-free)" (:avg-maintainability summary)]
-     ["Average instability" (:avg-instability summary)]]))
+     ["Average instability" (:avg-instability summary)]
+     ["Average entropy per file" (:avg-entropy summary)]]))
 
 (defn- summary-section [summary entries]
   (section "summary" "Summary"
@@ -170,6 +171,15 @@
                          [:td {:data-value (str (double delta))} (report/signed delta)]
                          (num-cell z) (num-cell (count files)) [:td subject]]))
                [:p [:em "none"]]))))
+
+(defn- unusual-files-section [{:keys [unusual-files]}]
+  (section "unusual-files" "Unusual files"
+           [:p report/unusual-files-intro]
+           (if (seq unusual-files)
+             (table {:class "sortable"} ["File" "Surprisal (bits a word)" "z" "Words"]
+                    (for [{:keys [path surprisal z words]} unusual-files]
+                      [[:td path] (num-cell surprisal) (num-cell z) (num-cell words)]))
+             [:p [:em "none"]])))
 
 (defn- require-item [{:keys [path lib alias refers]}]
   [:li [:code path] ": " [:code lib]
@@ -274,24 +284,30 @@
    [:title "Code Metrics Report"]
    [:style (raw (asset "report.css"))]])
 
-(defn- body [{:keys [files summary edges errors queue cleanup] :as result} top]
+(defn- sections
+  "The report's sections, in the Markdown report's order."
+  [{:keys [files summary edges errors queue cleanup] :as result} top]
+  [(summary-section summary queue)
+   (errors-section errors)
+   (queue-section queue top)
+   (hotspots-section result)
+   (unusual-section result)
+   (unusual-files-section result)
+   (cleanup-section cleanup)
+   (files-section files)
+   (architecture-section files edges)
+   (thresholds-section)])
+
+(defn- body [result top]
   [:body
-   [:main
-    [:header
-     [:h1 "Code Metrics Report"]
-     [:div {:class "toolbar needs-js"}
-      [:button {:type "button" :id "theme-toggle" :title "Colour theme: follows the system until you pick one"}
-       "Theme: auto"]
-      [:button {:type "button" :id "download-json"} "Download JSON"]]]
-    (summary-section summary queue)
-    (errors-section errors)
-    (queue-section queue top)
-    (hotspots-section result)
-    (unusual-section result)
-    (cleanup-section cleanup)
-    (files-section files)
-    (architecture-section files edges)
-    (thresholds-section)]
+   (into [:main
+          [:header
+           [:h1 "Code Metrics Report"]
+           [:div {:class "toolbar needs-js"}
+            [:button {:type "button" :id "theme-toggle" :title "Colour theme: follows the system until you pick one"}
+             "Theme: auto"]
+            [:button {:type "button" :id "download-json"} "Download JSON"]]]]
+         (sections result top))
    [:script {:type "application/json" :id "metrics-data"} (raw (embedded-json result))]
    [:script (raw (asset "report.js"))]])
 
