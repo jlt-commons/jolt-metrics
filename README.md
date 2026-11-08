@@ -344,3 +344,22 @@ directory scan; add a `*_spec.clj` file and it is picked up.
 
 `self_test.clj` runs the report on `src` and fails if anything is queued, so a
 change that crosses a threshold has to refactor or argue the threshold down.
+
+## CI and releases
+
+Every push to `main` and every pull request runs the tests. When they pass, CI runs
+the report on `src` and keeps `report.html`, `report.json` and `report.md` with the
+run as the `metrics-report` artifact, and the run's summary page shows the numbers.
+
+A release only happens after the tests pass, in one of two ways:
+
+- **From the Actions tab:** pick the `ci` workflow, choose *Run workflow* on `main`,
+  and give a version like `v0.2.0`. CI tags the commit and creates the release.
+- **From a tag:** push a version tag on a commit that's on `main`, for example
+  `git tag v0.2.0 && git push origin v0.2.0`.
+
+The release gets notes generated from the merged pull requests, with the three
+report files attached. The release is refused when the version isn't `vX.Y.Z`, when
+the tag or release already exists, when a manual run isn't on `main`, or when the
+commit isn't on `main`. A tag pushed with failing tests stays a plain tag with no
+release.
