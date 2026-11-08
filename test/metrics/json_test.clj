@@ -8,7 +8,7 @@
 
 (deftest the-report-has-the-lean-shape
   (let [r (json/report (core/analyze-files [["a.clj" "(ns a) (defn f [x] (if x 1 2))"]]))]
-    (is (= #{"tool" "schema_version" "summary" "findings" "hotspots" "unusual_changes" "cleanup"
+    (is (= #{"tool" "schema_version" "summary" "findings" "hotspots" "unusual_changes" "unusual_files" "cleanup"
              "errors" "files" "dependencies"} (set (keys r))))
     (is (= "jolt-metrics" (get r "tool")))
     (is (= 1 (get r "schema_version")))

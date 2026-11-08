@@ -11,7 +11,14 @@
   the mean of every change before it is unusual.  Keeping the whole history as
   the baseline, rather than a recent window, is what gave the paper its best
   precision: 58% of flagged commits were feature work maintainers would want to
-  look at, rising to 83% counting removals and porting."
+  look at, rising to 83% counting removals and porting.
+
+  The same words also give a distribution over the files as they are now.  A
+  file's surprisal is how many bits each of its words takes, on average, under
+  the word distribution of the rest of the project: the cross-entropy the paper
+  names as the next measure to try.  A file far more surprising than the others
+  speaks a different vocabulary: vendored, generated or example code, or a
+  concern that belongs somewhere else."
   (:require [clojure.math :as math]
             [clojure.string :as str]))
 
@@ -24,6 +31,11 @@
   "How many standard deviations from the mean a change has to be, either way,
   to be unusual; the paper's cut-off."
   3)
+
+(def min-words
+  "How many words a file needs for a surprisal: a handful says nothing about
+  its vocabulary."
+  50)
 
 (defn words
   "The words of source text, lower-cased: runs of letters, split where the case
@@ -51,6 +63,57 @@
   "The entropy of source text's words."
   [source]
   (entropy (words source)))
+
+(defn word-counts
+  "How many times each word occurs in source text."
+  [source]
+  (frequencies (words source)))
+
+(defn- file-surprisal
+  "Mean bits per word of a file's word counts c under the distribution of the
+  other files, given the project's counts, word total and vocabulary size;
+  every count gets one added, so a word nowhere else costs log2 of the
+  smoothed total."
+  [total n-all v c]
+  (let [n (reduce + 0 (vals c))]
+    (when (>= n min-words)
+      (/ (reduce + 0.0 (map (fn [[w k]]
+                              (* k (- (log2 (/ (+ 1.0 (- (get total w 0) k))
+                                               (+ (- n-all n) v))))))
+                            c))
+         n))))
+
+(defn surprisals
+  "Each file's surprisal from its word counts, against the other files; nil for
+  files under min-words."
+  [counts]
+  (let [total (apply merge-with + {} counts)
+        n-all (reduce + 0 (vals total))
+        v (count total)]
+    (mapv #(file-surprisal total n-all v %) counts)))
+
+(defn spread-z-scores
+  "Each value's z-score against all the values present; nil for an absent one,
+  and for all when fewer than min-history are present or they don't differ."
+  [xs]
+  (let [present (filterv some? xs)
+        n (count present)
+        mean (when (pos? n) (/ (reduce + present) n))
+        sd (when (pos? n)
+             (math/sqrt (/ (reduce + (map #(let [d (- % mean)] (* d d)) present)) n)))]
+    (mapv (fn [x]
+            (when (and x (>= n min-history) (pos? sd))
+              (/ (- x mean) sd)))
+          xs)))
+
+(defn unusual-files
+  "The files whose :surprisal is more than z-limit deviations above the
+  files', most surprising first, each with its :z."
+  [files]
+  (->> (map (fn [f z] (assoc f :z z)) files (spread-z-scores (mapv :surprisal files)))
+       (filter #(and (:z %) (> (:z %) z-limit)))
+       (sort-by #(- (:z %)))
+       vec))
 
 (defn- z-score
   "How many standard deviations x is from the mean of changes whose count, sum
