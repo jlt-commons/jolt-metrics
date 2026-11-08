@@ -55,8 +55,131 @@ jobs:
           path: metrics-report/
           if-no-files-found: error
 
-  release:
+  # a standalone binary per platform, built and smoke-tested on every run so a
+  # broken build shows up before a release, not in one
+  build:
     needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-macos
+            shell: bash
+          # 22.04's glibc, so the binary runs there and on anything newer
+          - os: ubuntu-22.04
+            target: x86_64-linux
+            shell: bash
+          # the archive carries the MSYS2 DLLs the binary links
+          - os: windows-latest
+            target: x86_64-windows
+            shell: msys2 {0}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    # jolt's git and Maven caches, inside the workspace so the smoke test can
+    # hide them. jolt reads HOME, which in an MSYS2 shell isn't the runner's.
+    env:
+      JOLT_GITLIBS_DIR: ${{ github.workspace }}/.ci-deps/gitlibs
+      JOLT_MAVEN_REPOSITORY: ${{ github.workspace }}/.ci-deps/m2
+      # the input for a manual run, the tag's name for a tag push
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # the smoke test reads churn and unusual changes from the history
+          fetch-depth: 0
+
+      - name: Set up MSYS2
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          path-type: inherit
+          install: >-
+            curl unzip zip
+            mingw-w64-ucrt-x86_64-ntldd
+            mingw-w64-ucrt-x86_64-zlib
+
+      - name: Install jolt's libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y liblz4-1 zlib1g libtinfo6
+
+      - name: Install jolt
+        run: ci/install-jolt.sh "$JOLT_VERSION" "${{ matrix.target }}"
+
+      - name: Build binary
+        run: jolt build -m metrics.cli -o jolt-metrics
+
+      # a release's archive carries its version; any other run's gets the bare name
+      - name: Package
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            name="jolt-metrics-${VERSION}-${{ matrix.target }}"
+          else
+            name="jolt-metrics-${{ matrix.target }}"
+          fi
+          mkdir -p "$name"
+          exe=jolt-metrics
+          [ -f jolt-metrics.exe ] && exe=jolt-metrics.exe
+          cp "$exe" README.md LICENSE "$name/"
+          # Windows looks beside the exe first for the DLLs it loads
+          if [ "$RUNNER_OS" = Windows ]; then
+            deps=$(ntldd -R "$exe" | grep -ioE '[^ ]*ucrt64[\\/]bin[\\/][^ ]*\.dll' || true)
+            for d in $deps; do cp "$(cygpath -u "$d")" "$name/"; done
+          fi
+          # what the binary links, for the release notes and for debugging
+          case "$RUNNER_OS" in
+            Linux) ldd "$name/$exe" ;;
+            macOS) otool -L "$name/$exe" ;;
+            Windows) ls "$name" ;;
+          esac
+          echo "PKG_DIR=$name" >> "$GITHUB_ENV"
+          echo "PKG_EXE=$exe" >> "$GITHUB_ENV"
+
+      # Run the packaged binary with the build's dependency caches hidden, so
+      # it can't lean on files only the build machine has. On Windows MSYS2
+      # leaves the PATH too, so the archive has to carry every DLL it loads.
+      - name: Smoke test
+        run: |
+          homes="$HOME"
+          if [ -n "${USERPROFILE:-}" ]; then homes="$homes $(cygpath -u "$USERPROFILE")"; fi
+          hidden=""
+          dirs="$(pwd)/.ci-deps"
+          for h in $homes; do dirs="$dirs $h/.jolt/gitlibs $h/.jolt/mvnlibs $h/.m2"; done
+          for d in $dirs; do
+            if [ -d "$d" ]; then mv "$d" "$d.hidden"; hidden="$hidden $d"; fi
+          done
+          if [ "$RUNNER_OS" = Windows ]; then
+            PATH=$(printf %s "$PATH" | tr : '\n' | grep -vi ucrt64 | paste -sd:)
+          fi
+          status=0
+          ci/smoke.sh "./$PKG_DIR/$PKG_EXE" src || status=$?
+          for d in $hidden; do mv "$d.hidden" "$d"; done
+          exit $status
+
+      - name: Archive
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            zip -qr "${PKG_DIR}.zip" "$PKG_DIR"
+            echo "PKG=${PKG_DIR}.zip" >> "$GITHUB_ENV"
+          else
+            tar czf "${PKG_DIR}.tar.gz" "$PKG_DIR"
+            echo "PKG=${PKG_DIR}.tar.gz" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: ${{ env.PKG }}
+          if-no-files-found: error
+
+  release:
+    needs: [test, build]
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -101,12 +224,22 @@ jobs:
         with:
           name: metrics-report
           path: metrics-report
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: binaries
+          merge-multiple: true
       - name: Release
         run: |
+          cat > notes.md <<'NOTES'
+          Standalone binaries for macOS (arm64), Linux (x86_64) and Windows (x86_64): unpack the archive and run `jolt-metrics <dir>`, no jolt install needed. `git` on the PATH adds churn, hotspots and unusual changes. The macOS binary is unsigned, so clear the quarantine flag first: `xattr -d com.apple.quarantine jolt-metrics`.
+          NOTES
           gh release create "$VERSION" \
             --target "$GITHUB_SHA" \
             --title "$VERSION" \
+            --notes-file notes.md \
             --generate-notes \
+            binaries/* \
             metrics-report/report.html \
             metrics-report/report.json \
             metrics-report/report.md

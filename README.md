@@ -26,6 +26,18 @@ stated contract, not just unit tests.
 
 ## Usage
 
+### Install
+
+Each [release](https://github.com/jlt-commons/jolt-metrics/releases) has a
+standalone binary for macOS (arm64), Linux (x86_64) and Windows (x86_64). Unpack
+the archive and put `jolt-metrics` on your PATH; it needs no jolt install, and
+`jolt-metrics <dir>` takes the same options as `jolt -m metrics.cli <dir>`
+below. The macOS binary is unsigned, so clear the quarantine flag once:
+`xattr -d com.apple.quarantine jolt-metrics`. Churn, hotspots and unusual
+changes need `git` on the PATH.
+
+To build one yourself: `jolt build -m metrics.cli -o jolt-metrics`.
+
 ### CLI
 
 ```console
@@ -395,6 +407,11 @@ Every push to `main` and every pull request runs the tests. When they pass, CI r
 the report on `src` and keeps `report.html`, `report.json` and `report.md` with the
 run as the `metrics-report` artifact, and the run's summary page shows the numbers.
 
+Every run also builds the binary on macOS, Linux and Windows and runs
+`ci/smoke.sh` against the packaged archive, with jolt's dependency caches hidden
+and, on Windows, MSYS2 off the PATH, so a missing resource or DLL fails CI rather
+than a user's machine. The archives are kept with the run.
+
 A release only happens after the tests pass, in one of two ways:
 
 - **From the Actions tab:** pick the `ci` workflow, choose *Run workflow* on `main`,
@@ -403,10 +420,10 @@ A release only happens after the tests pass, in one of two ways:
   `git tag v0.2.0 && git push origin v0.2.0`.
 
 The release gets notes generated from the merged pull requests, with the three
-report files attached. The release is refused when the version isn't `vX.Y.Z`, when
-the tag or release already exists, when a manual run isn't on `main`, or when the
-commit isn't on `main`. A tag pushed with failing tests stays a plain tag with no
-release.
+binaries and the three report files attached. The release is refused when the
+version isn't `vX.Y.Z`, when the tag or release already exists, when a manual run
+isn't on `main`, or when the commit isn't on `main`. A tag pushed with failing
+tests or a failing build stays a plain tag with no release.
 
 ## Licence
 
