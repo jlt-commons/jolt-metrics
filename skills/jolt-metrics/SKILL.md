@@ -42,8 +42,9 @@ source ──► normalized model ──► pure metric visitors ──► queue
 - **`metrics.paths`** handles globs and resolving loaded files; **`metrics.config`**
   reads `.jolt-metrics.edn`.
 - **`metrics.queue`** holds the thresholds and ranks the findings; **`metrics.cleanup`**
-  finds what looks unused; **`metrics.git`** reads churn and per-commit entropy
-  changes, and is the only shell-out. It reads blobs as bytes and decodes them
+  finds what looks unused; **`metrics.git`** reads churn, per-commit entropy
+  changes and what git ignores (which `analyze-dir` skips via `:ignored`), and is
+  the only shell-out. It reads blobs as bytes and decodes them
   itself: Jolt's `sh` ignores `:out-enc` and always decodes UTF-8.
 - **`metrics.report`** renders Markdown; **`metrics.json`** the lean, versioned JSON
   for tools (snake_case keys, always present; bump `schema-version` when a key goes
@@ -111,8 +112,8 @@ are switches: see the `tree-builders` in `metrics.reader`.
 - `jolt -M:test` — run all writ specs + reader tests; `-M:test:dev` swaps in a
   sibling `../writ` checkout.
 - `jolt -m metrics.cli <dir> [out] [--format md|edn|json|html] [--top N] [--days N]
-  [--commits N] [--no-git] [--exclude GLOB] [--config FILE]` — the report; without `--format`, out's
-  extension picks it.
+  [--commits N] [--no-git] [--no-gitignore] [--exclude GLOB] [--config FILE]` — the
+  report; without `--format`, out's extension picks it.
 
 Note: running `jolt -M:test` relies on `:main-opts` in `deps.edn`; do not
 also pass `-m metrics.runner` on the CLI, or it leaks into the runner's args.

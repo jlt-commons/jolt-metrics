@@ -3,6 +3,7 @@
   (:require [clojure.data.json]
             [clojure.test :refer [deftest is]]
             [clojure.string :as str]
+            [clojure.java.shell :as shell]
             [metrics.cli :as cli]
             [jolt.fs :as fs]))
 
@@ -101,6 +102,38 @@
     (is (= #{"src/a.clj" "vendor/b.clj" "gen/c.ss"} (analyzed-paths dir)))
     (is (= #{"src/a.clj" "gen/c.ss"} (analyzed-paths dir "--exclude" "vendor/**")))
     (is (= #{"src/a.clj"} (analyzed-paths dir "--exclude" "vendor/**" "--exclude" "gen")))))
+
+(defn- git-project
+  "A temp-project that is also a git repository with everything committed but
+  what its .gitignore leaves out."
+  [files]
+  (let [dir (temp-project files)
+        git #(apply shell/sh "git" "-C" dir %&)]
+    (git "init" "-q")
+    (git "add" ".")
+    (git "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-qm" "init")
+    dir))
+
+(deftest what-git-ignores-is-left-out
+  (let [src "(ns demo.core) (defn f [xs] xs)"
+        dir (git-project [[".gitignore" "target/\n"]
+                          ["src/demo/core.clj" src]
+                          ["target/classes/demo/core.clj" src]])]
+    (spit (str dir "/src/new.clj") "(ns demo.new)")
+    (is (= #{"src/demo/core.clj" "src/new.clj"} (analyzed-paths dir)))
+    (is (= #{"src/demo/core.clj" "src/new.clj" "target/classes/demo/core.clj"}
+           (analyzed-paths dir "--no-gitignore")))))
+
+(deftest a-subdirectory-of-a-repository-uses-its-gitignore
+  (let [dir (git-project [["src/.gitignore" "gen/\n"] ["src/a.clj" "(ns a)"] ["src/gen/b.clj" "(ns b)"]])
+        sub (str dir "/src")
+        data (read-string (:out (cli/run [sub "--format" "edn" "--no-git"])))]
+    (is (= [(str sub "/a.clj")] (map :path (:files data))))))
+
+(deftest a-tracked-file-counts-even-when-a-pattern-matches-it
+  (let [dir (git-project [["a.clj" "(ns a)"] ["gen/b.clj" "(ns b)"]])]
+    (spit (str dir "/.gitignore") "gen/\n")
+    (is (= #{"a.clj" "gen/b.clj"} (analyzed-paths dir)))))
 
 (deftest the-config-file-is-read-from-the-directory
   (let [dir (temp-project [["src/a.clj" "(ns a)"] ["vendor/b.clj" "(ns b)"]

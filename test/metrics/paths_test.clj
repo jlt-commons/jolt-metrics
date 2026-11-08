@@ -61,3 +61,14 @@
     (testing "an ambiguous suffix or no match resolves to nothing"
       (is (nil? (resolve-from "host/a.ss" "lib/rt.ss" nil)))
       (is (nil? (resolve-from "host/a.ss" "none.ss" nil))))))
+
+(deftest ignored-entries-are-literal-paths
+  (let [entries ["target/" "src/gen/" "notes.clj" "a*b.clj"]]
+    (is (paths/ignored? entries "target/classes/demo/core.clj"))
+    (is (paths/ignored? entries "src/gen/x.clj"))
+    (is (paths/ignored? entries "notes.clj"))
+    (is (paths/ignored? entries "a*b.clj"))
+    (is (not (paths/ignored? entries "axb.clj")))
+    (is (not (paths/ignored? entries "targets/a.clj")))
+    (is (not (paths/ignored? entries "src/notes.clj")))
+    (is (not (paths/ignored? nil "target/a.clj")))))

@@ -188,11 +188,12 @@
 
 (defn code-path?
   "Is path, as the analyzer writes it, code that analyze-dir would measure under
-  root, given :exclude and :test-paths, and not a test?"
-  [root {:keys [exclude test-paths]} path]
+  root, given :exclude, :ignored and :test-paths, and not a test?"
+  [root {:keys [exclude ignored test-paths]} path]
   (let [rel (paths/relative root path)]
     (boolean (and (language/of path)
                   (not (paths/excluded? exclude rel))
+                  (not (paths/ignored? ignored rel))
                   (not (paths/test-file? (or test-paths default-test-paths) rel))))))
 
 (defn- unusual-changes
@@ -316,13 +317,16 @@
 
 (defn analyze-dir
   "Analyze every source file of a language we know under a directory, leaving out
-  those :exclude globs match; other opts as for analyze-files."
+  those :exclude globs match and those :ignored lists (paths relative to dir, as
+  metrics.git/ignored gives them); other opts as for analyze-files."
   ([dir] (analyze-dir dir nil))
-  ([dir {:keys [exclude] :as opts}]
-   (let [paths (->> (language/globs)
+  ([dir {:keys [exclude ignored] :as opts}]
+   (let [left-out? #(let [rel (paths/relative dir %)]
+                      (or (paths/excluded? exclude rel) (paths/ignored? ignored rel)))
+         paths (->> (language/globs)
                     (mapcat #(fs/glob dir %))
                     (map str)
                     (filter language/of)
-                    (remove #(paths/excluded? exclude (paths/relative dir %)))
+                    (remove left-out?)
                     distinct)]
      (analyze-loaded (for [p paths] [p #(slurp p)]) (assoc opts :root dir)))))
