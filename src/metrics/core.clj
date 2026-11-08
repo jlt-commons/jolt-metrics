@@ -316,13 +316,15 @@
 
 (defn analyze-dir
   "Analyze every source file of a language we know under a directory, leaving out
-  those :exclude globs match; other opts as for analyze-files."
+  those :exclude globs match and directories named like one, such as a checkout
+  called deps.clj; other opts as for analyze-files."
   ([dir] (analyze-dir dir nil))
   ([dir {:keys [exclude] :as opts}]
    (let [paths (->> (language/globs)
                     (mapcat #(fs/glob dir %))
                     (map str)
                     (filter language/of)
+                    (filter fs/regular-file?)
                     (remove #(paths/excluded? exclude (paths/relative dir %)))
                     distinct)]
      (analyze-loaded (for [p paths] [p #(slurp p)]) (assoc opts :root dir)))))

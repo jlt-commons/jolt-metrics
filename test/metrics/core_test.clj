@@ -4,7 +4,8 @@
   (:require [clojure.test :refer [deftest is testing]]
             [metrics.core :as core]
             [metrics.reader :as r]
-            [metrics.report :as report]))
+            [metrics.report :as report]
+            [jolt.fs :as fs]))
 
 (def ran (atom false))
 
@@ -151,3 +152,13 @@
 (deftest the-report-renders-isolated-namespaces
   (is (re-find #"a\.clj \| 0 \| 0 \| - \| isolated"
                (report/render (core/analyze-files [["a.clj" "(ns a)"]])))))
+
+(deftest a-directory-named-like-source-is-not-a-file
+  (let [dir (str (fs/create-temp-dir))]
+    (fs/create-dirs (str dir "/deps.clj"))
+    (spit (str dir "/a.clj") "(ns a)")
+    (spit (str dir "/deps.clj/b.clj") "(ns b)")
+    (let [{:keys [files errors]} (core/analyze-dir dir)]
+      (is (= [] errors))
+      (is (= #{"a.clj" "deps.clj/b.clj"}
+             (set (map #(subs (:path %) (inc (count dir))) files)))))))
