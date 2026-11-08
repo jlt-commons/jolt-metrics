@@ -81,3 +81,62 @@
 
 (deftest commits-takes-a-number
   (is (= 2 (:exit (cli/run ["src" "--commits" "lots"])))))
+
+;; --- unusual files ---------------------------------------------------------
+
+(defn- typical-file [i]
+  [(str "src/f" i ".clj")
+   (str "(ns f" i ")\n(defn get-user [db id] (fetch-user db id))\n;; "
+        (str/join " " (take (+ 60 i) (cycle ["user" "account" "fetch" "store" "db"])))
+        "\n")])
+
+(def ^:private foreign-file
+  ["src/vendor.clj"
+   (str "(ns vendor)\n;; " (str/join " " (take 80 (cycle ["zebra" "quantum" "lattice" "xylophone"]))))])
+
+(def ^:private project
+  (conj (mapv typical-file (range 20)) foreign-file ["test/f_test.clj" "(ns f-test)"]))
+
+(defn- by-path [result]
+  (into {} (map (juxt :path identity)) (:files result)))
+
+(deftest files-have-entropy-and-surprisal
+  (let [files (by-path (core/analyze-files project {:root "."}))]
+    (is (double? (:entropy (files "src/f1.clj"))))
+    (is (double? (:surprisal (files "src/f1.clj"))))
+    (is (nil? (:surprisal (files "test/f_test.clj"))))
+    (is (not-any? :word-counts (vals files)))))
+
+(deftest a-file-in-a-foreign-vocabulary-is-unusual
+  (let [[u & more] (:unusual-files (core/analyze-files project {:root "."}))]
+    (is (nil? more))
+    (is (= "src/vendor.clj" (:path u)))
+    (is (> (:z u) 3))
+    (is (= 82 (:words u)))))
+
+(deftest the-summary-has-the-entropy-spread
+  (let [{:keys [files summary]} (core/analyze-files project {:root "."})
+        code (remove :test? files)]
+    (is (= (/ (reduce + (map :entropy code)) (count code)) (:avg-entropy summary)))))
+
+(deftest markdown-lists-unusual-files
+  (let [md (report/render (core/analyze-files project {:root "."}))]
+    (is (str/includes? md "## Unusual files"))
+    (is (re-find #"\| src/vendor\.clj \| [\d.]+ \| [\d.]+ \| 82 \|" md))
+    (is (str/includes? md "| Average entropy per file |")))
+  (is (str/includes? (report/render (core/analyze-files [["a.clj" "(ns a)"]])) "## Unusual files\n\n")))
+
+(deftest json-has-unusual-files
+  (let [r (json/report (core/analyze-files project {:root "."}))
+        row (first (filter #(= "src/f1.clj" (get % "path")) (get r "files")))]
+    (is (= ["src/vendor.clj"] (map #(get % "path") (get r "unusual_files"))))
+    (is (= #{"path" "surprisal" "z" "words"} (set (keys (first (get r "unusual_files"))))))
+    (is (number? (get row "entropy")))
+    (is (number? (get row "surprisal")))
+    (is (number? (get-in r ["summary" "entropy_avg"]))))
+  (is (= [] (get (json/report (core/analyze-files [])) "unusual_files"))))
+
+(deftest html-has-unusual-files
+  (let [p (html/render (core/analyze-files project {:root "."}))]
+    (is (str/includes? p "<section id=\"unusual-files\""))
+    (is (str/includes? p "src/vendor.clj"))))

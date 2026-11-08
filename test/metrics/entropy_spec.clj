@@ -9,7 +9,13 @@
   its files' entropy changes, and its z-score is how many standard deviations
   that change sits from the mean of the commits before it.  A commit with at
   least min-history commits before it and a z-score over z-limit either way
-  is unusual."
+  is unusual.
+
+  Over files rather than time: a file's surprisal is the mean bits per word of
+  its words under the word distribution of the other files, smoothed by adding
+  one to every count in the project's vocabulary.  Files with fewer than
+  min-words words get none.  A file whose surprisal is more than z-limit
+  standard deviations above the mean of the files' is unusual."
   (:require [writ.spec :refer [spec ann law refine graph assume]]
             [clojure.math :as math]
             [clojure.string :as str]
@@ -30,7 +36,23 @@
       :z Double}]
   true)
 
+(refine Scored
+  [f {:path String :surprisal (Opt Double)}]
+  true)
+
+(refine UnusualFile
+  [f {:path String :surprisal (Opt Double) :z Double}]
+  true)
+
 (ann words [String -> (List String)])
+(ann word-counts [String -> (Map String Nat)])
+(refine Surprisals
+  [xs (Vec (Opt Double))]
+  (every? #(or (nil? %) (<= 0.0 %)) xs))
+
+(ann surprisals [(Vec (Map String Nat)) -> Surprisals])
+(ann spread-z-scores [(Vec (Opt Double)) -> (Vec (Opt Double))])
+(ann unusual-files [(Vec Scored) -> (Vec UnusualFile)])
 (ann entropy [(List String) -> Double])
 (ann source-entropy [String -> Double])
 (ann z-scores [(Vec Double) -> (Vec (Opt Double))])
@@ -45,6 +67,15 @@
             :words   {[entropy] #{:entropy}}
             :deltas  {[z-scores] #{:scores}}
             :commits {[unusual-changes] #{:unusual}}}})
+
+(graph unusual-files
+  {:states {:source String, :counts (Map String Nat), :all-counts (Vec (Map String Nat)),
+            :surprisals Surprisals, :spread (Vec (Opt Double)),
+            :files (Vec Scored), :unusual (Vec UnusualFile)}
+   :edges  {:source     {[word-counts] #{:counts}}
+            :all-counts {[surprisals] #{:surprisals}}
+            :surprisals {[spread-z-scores] #{:spread}}
+            :files      {[unusual-files] #{:unusual}}}})
 
 ;; --- the spec's model ------------------------------------------------------
 
@@ -163,3 +194,84 @@
     (let [cs (mapv commit xs)]
       (= (count (e/unusual-changes cs))
          (count (filter e/unusual? (e/z-scores (mapv :delta cs))))))))
+
+;; --- over files ------------------------------------------------------------
+
+(law word-counts-count-the-words
+  (= (e/word-counts "fooBar foo") {"foo" 2 "bar" 1}))
+
+(law word-counts-are-the-frequencies-of-the-words
+  (forall [s String]
+    (= (e/word-counts s) (frequencies (e/words s)))))
+
+(defn- model-surprisals [counts]
+  (let [total (apply merge-with + {} counts)
+        n-all (reduce + 0 (vals total))
+        v (count total)]
+    (vec (for [c counts
+               :let [n (reduce + 0 (vals c))]]
+           (when (>= n e/min-words)
+             (/ (reduce + 0.0 (for [[w k] c]
+                                (* k (- (log2 (/ (+ 1.0 (- (get total w 0) k))
+                                                 (+ (- n-all n) v)))))))
+                n))))))
+
+(law surprisals-are-the-model
+  (forall [counts (Vec (Map String Nat))]
+    (every? true? (map close? (e/surprisals counts) (model-surprisals counts)))))
+
+(law there-is-a-surprisal-per-file
+  (forall [counts (Vec (Map String Nat))]
+    (= (count (e/surprisals counts)) (count counts))))
+
+(law small-files-have-no-surprisal
+  (let [[small big] (e/surprisals [{"a" (dec e/min-words)} {"a" 100}])]
+    (and (nil? small) (some? big))))
+
+(law surprisal-is-never-negative
+  (forall [counts (Vec (Map String Nat))]
+    (every? #(or (nil? %) (<= 0.0 %)) (e/surprisals counts))))
+
+;; two files that share their words and one that shares none: the stranger is
+;; the more surprising
+(def ^:private shared {"get" 30 "user" 30})
+
+(law a-file-of-foreign-words-is-more-surprising
+  (let [[a b c] (e/surprisals [shared shared {"zap" 30 "frob" 30}])]
+    (and (= a b) (< a c))))
+
+(law spread-scores-are-against-every-file
+  (= (e/spread-z-scores (conj (vec (take 10 (cycle [1.0 3.0]))) nil 6.0))
+     (let [xs (conj (vec (take 10 (cycle [1.0 3.0]))) 6.0)
+           n (count xs)
+           mean (/ (reduce + xs) n)
+           sd (math/sqrt (/ (reduce + (map #(let [d (- % mean)] (* d d)) xs)) n))]
+       (conj (mapv #(/ (- % mean) sd) (butlast xs)) nil (/ (- 6.0 mean) sd)))))
+
+(law identical-files-have-no-spread-score
+  (every? nil? (e/spread-z-scores (vec (repeat 12 5.0)))))
+
+(law too-few-files-have-no-spread-score
+  (every? nil? (e/spread-z-scores (vec (take (dec e/min-history) (cycle [1.0 9.0]))))))
+
+(law there-is-a-spread-score-per-file
+  (forall [xs (Vec (Opt Int))]
+    (= (count xs) (count (e/spread-z-scores (mapv #(some-> % double) xs))))))
+
+(defn- scored [i s] {:path (str "f" i ".clj") :surprisal s})
+
+(def ^:private typical (vec (take 20 (cycle [9.0 10.0]))))
+
+(law an-unusually-surprising-file-is-unusual
+  (let [files (conj (mapv scored (range) typical) (scored 20 20.0) (scored 21 nil))
+        [u & more] (e/unusual-files files)]
+    (and (nil? more) (= "f20.clj" (:path u)) (> (:z u) e/z-limit))))
+
+(law an-unusually-ordinary-file-is-not-unusual
+  (= [] (e/unusual-files (conj (mapv scored (range) typical) (scored 20 0.0)))))
+
+(law unusual-files-come-most-surprising-first
+  (forall [xs (Vec Int)]
+    (let [us (e/unusual-files (mapv scored (range) (map double xs)))]
+      (and (= (map :z us) (sort-by - (map :z us)))
+           (every? #(> (:z %) e/z-limit) us)))))

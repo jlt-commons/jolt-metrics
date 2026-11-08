@@ -143,10 +143,13 @@
         scanned ((:scan lang) source)
         locs (loc/tally (:classes scanned))
         fns (mapv #(function-metrics % scanned) (:functions model))
-        file-h (average-halstead (map :halstead fns))]
+        file-h (average-halstead (map :halstead fns))
+        ws (entropy/words source)]
     (merge
      (file-facts path lang model)
      {:loc locs
+      :entropy (entropy/entropy ws)
+      :word-counts (frequencies ws)
       :functions (mapv #(dissoc % :halstead) fns)
       :halstead file-h}
      (file-scores model fns)
@@ -155,7 +158,8 @@
 (defn summarize
   "Project-level rollups over per-file metrics; unreadable is how many files
   could not be analyzed at all.  The averages are per function, and the
-  maintainability one covers only files with a defined, comment-free index."
+  maintainability one covers only files with a defined, comment-free index.
+  The entropy one is the paper's entropy spread, over the files that aren't tests."
   [files unreadable]
   (let [n (count files)
         fns (mapcat :functions files)]
@@ -169,7 +173,8 @@
      :cognitive (reduce + 0 (map :cognitive files))
      :avg-cyclomatic (average (map :cyclomatic fns))
      :avg-maintainability (average (keep :maintainability-index-without-comments files))
-     :avg-instability (average (keep :instability files))}))
+     :avg-instability (average (keep :instability files))
+     :avg-entropy (average (keep :entropy (remove :test? files)))}))
 
 (defn- risk-fn
   "A function giving a file's hotspot risk, or nil when it has too few changes to
@@ -204,6 +209,26 @@
     {:commits (count history)
      :changes (entropy/unusual-changes history)}))
 
+(defn- assoc-surprisal
+  "Files with their word count, and the surprisal of each that isn't a test
+  against the rest that aren't."
+  [files]
+  (let [code? (complement :test?)
+        scores (entropy/surprisals (mapv :word-counts (filter code? files)))
+        by-path (zipmap (map :path (filter code? files)) scores)]
+    (mapv #(assoc %
+                  :words (reduce + 0 (vals (:word-counts %)))
+                  :surprisal (when (code? %) (get by-path (:path %))))
+          files)))
+
+(defn- unusual-files
+  "The files whose vocabulary is unusual for the project, with their word counts."
+  [files]
+  (let [words (into {} (map (juxt :path :words)) files)]
+    (mapv #(assoc % :words (words (:path %)))
+          (entropy/unusual-files (mapv #(select-keys % [:path :surprisal])
+                                       (remove :test? files))))))
+
 (defn- mark-test-file
   "Everything defined in a test file is test code, helpers included, so it isn't
   queued or called unused."
@@ -218,7 +243,7 @@
   "A file's metrics without what only the cleanup and queue passes needed."
   [file]
   (-> file
-      (dissoc :symbols :qualifiers :libspecs :unused-public? :load-paths)
+      (dissoc :symbols :qualifiers :libspecs :unused-public? :load-paths :word-counts)
       (update :functions (fn [fns] (mapv #(dissoc % :self-refs) fns)))))
 
 (defn- load-all
@@ -291,7 +316,8 @@
   [loaders {:keys [changes days root test-paths history] :as opts}]
   (let [{:keys [files errors]} (load-all loaders)
         edges (dependency-edges files root)
-        files (annotated-files files edges changes #(mark-test-file % root test-paths))
+        files (assoc-surprisal
+               (annotated-files files edges changes #(mark-test-file % root test-paths)))
         risk-of (risk-fn files)
         result-files (mapv public-file files)]
     {:files result-files
@@ -303,6 +329,7 @@
      :hotspots (queue/hotspots files risk-of)
      :queue (queue/build files risk-of)
      :unusual-changes (unusual-changes history)
+     :unusual-files (unusual-files files)
      :cleanup (cleanup/candidates-of files (select-keys opts [:root :api-namespaces :api-paths]))}))
 
 (defn analyze-files
@@ -317,8 +344,9 @@
 
 (defn analyze-dir
   "Analyze every source file of a language we know under a directory, leaving out
-  those :exclude globs match and those :ignored lists (paths relative to dir, as
-  metrics.git/ignored gives them); other opts as for analyze-files."
+  those :exclude globs match, those :ignored lists (paths relative to dir, as
+  metrics.git/ignored gives them) and directories named like one, such as a
+  checkout called deps.clj; other opts as for analyze-files."
   ([dir] (analyze-dir dir nil))
   ([dir {:keys [exclude ignored] :as opts}]
    (let [left-out? #(let [rel (paths/relative dir %)]
@@ -327,6 +355,7 @@
                     (mapcat #(fs/glob dir %))
                     (map str)
                     (filter language/of)
+                    (filter fs/regular-file?)
                     (remove left-out?)
                     distinct)]
      (analyze-loaded (for [p paths] [p #(slurp p)]) (assoc opts :root dir)))))

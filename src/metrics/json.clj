@@ -43,7 +43,8 @@
      "cyclomatic_avg" (:avg-cyclomatic summary)
      "cognitive_total" (:cognitive summary)
      "maintainability_avg" (:avg-maintainability summary)
-     "instability_avg" (:avg-instability summary)}))
+     "instability_avg" (:avg-instability summary)
+     "entropy_avg" (:avg-entropy summary)}))
 
 (defn- violation [{:keys [rule value limit band]}]
   {"rule" rule "value" value "limit" limit "band" band})
@@ -106,7 +107,9 @@
    "afferent" (:afferent-coupling f)
    "instability" (:instability f)
    "instability_band" (:instability-band f)
-   "changes" (:changes f)})
+   "changes" (:changes f)
+   "entropy" (:entropy f)
+   "surprisal" (:surprisal f)})
 
 (defn report
   "The lean report for an analysis result, as data with string keys."
@@ -118,6 +121,9 @@
     "findings" (vec (map-indexed finding (:queue result)))
     "hotspots" (hotspots result)
     "unusual_changes" (unusual-changes result)
+    "unusual_files" (mapv (fn [{:keys [path surprisal z words]}]
+                            {"path" path "surprisal" surprisal "z" z "words" words})
+                          (:unusual-files result))
     "cleanup" (cleanup (:cleanup result))
     "errors" (mapv (fn [{:keys [path error]}] {"path" path "error" error}) (:errors result))
     "files" (mapv file-row (sort-by :path (:files result)))

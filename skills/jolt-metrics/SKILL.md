@@ -25,7 +25,7 @@ source ──► normalized model ──► pure metric visitors ──► queue
                                 cognitive.clj
                                 coupling.clj
                                 hotspot.clj, rules.clj
-                                entropy.clj (unusual changes)
+                                entropy.clj (unusual changes and files)
                                 loc.clj (over scanner's line classes)
 ```
 
