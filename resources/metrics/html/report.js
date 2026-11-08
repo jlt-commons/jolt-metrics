@@ -85,18 +85,22 @@
     if (button) button.textContent = "Theme: " + theme;
   }
 
+  // The page's own copy; storage is only written through, so the button still
+  // cycles when storage is blocked.
+  var currentTheme = readTheme();
+
   function nextTheme(button) {
-    var theme = THEMES[(THEMES.indexOf(readTheme()) + 1) % THEMES.length];
-    try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* not remembered */ }
-    applyTheme(theme, button);
+    currentTheme = THEMES[(THEMES.indexOf(currentTheme) + 1) % THEMES.length];
+    try { localStorage.setItem(THEME_KEY, currentTheme); } catch (e) { /* not remembered */ }
+    applyTheme(currentTheme, button);
   }
 
-  applyTheme(readTheme(), null);
+  applyTheme(currentTheme, null);
 
   function init() {
     var themeButton = document.getElementById("theme-toggle");
     if (themeButton) {
-      applyTheme(readTheme(), themeButton);
+      applyTheme(currentTheme, themeButton);
       themeButton.addEventListener("click", function () { nextTheme(themeButton); });
     }
     document.querySelectorAll("table.sortable").forEach(makeSortable);

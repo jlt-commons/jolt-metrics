@@ -67,8 +67,10 @@
   (when (> total shown)
     [:p {:class "note"} "and " (- total shown) " more; use " [:code "--format json"] " for all."]))
 
-(defn- plural [n noun]
-  (str n " " noun (when (not= 1 n) "s")))
+(defn- plural
+  "n and noun, plural unless n is one; n may already be formatted text."
+  [n noun]
+  (str n " " noun (when (not= "1" (str n)) "s")))
 
 ;; --- summary and errors ----------------------------------------------------
 

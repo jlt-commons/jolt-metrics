@@ -51,3 +51,9 @@
     (is (str/includes? p ":root[data-theme=\"dark\"]"))
     (is (str/includes? p ":root:not([data-theme=\"light\"])"))
     (is (str/includes? p "id=\"theme-toggle\""))))
+
+(deftest one-is-singular
+  (let [body (apply str (repeat 60 "  (g x)\n"))
+        p (page [["a.clj" (str "(ns a)\n(defn f [x]\n" body "  x)")]])]
+    (is (str/includes? p "1 param,"))
+    (is (not (str/includes? p "1 params")))))
