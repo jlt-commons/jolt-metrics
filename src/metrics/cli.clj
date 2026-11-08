@@ -8,6 +8,8 @@
   (:require [metrics.config :as config]
             [metrics.core :as core]
             [metrics.git :as git]
+            [metrics.html :as html]
+            [metrics.json :as json]
             [metrics.report :as report]
             [clojure.string :as str]
             [jolt.fs :as fs]))
@@ -17,8 +19,9 @@
 
 Prints the report, or writes it to out.
 
-  --format md|edn   Markdown for reading, EDN with every finding (default md)
-  --top N           Queue entries to show in Markdown (default 25)
+  --format FORMAT   md for reading, edn with every finding, json for tools,
+                    html to share (default md, or from out's extension)
+  --top N           Queue entries to show in Markdown and HTML (default 25)
   --days N          How much git history counts as recent churn (default 90)
   --no-git          Skip git history: no churn and no hotspots
   --exclude GLOB    Leave out matching files, relative to <dir>; can be repeated
@@ -32,14 +35,19 @@ Prints the report, or writes it to out.
     (parse-long text)))
 
 (def ^:private default-options
-  {:format :md :days 90 :git true :top report/default-top :paths []})
+  {:days 90 :git true :top report/default-top :paths []})
+
+(def ^:private formats #{"md" "edn" "json" "html"})
+
+(def ^:private extension-formats
+  {"md" :md "edn" :edn "json" :json "html" :html "htm" :html})
 
 (def ^:private value-options
   "Options that take a value: which key it sets, how to read it, and what to say
   when it can't be read."
   {"--format" {:key :format
-               :parse #(when (contains? #{"md" "edn"} %) (keyword %))
-               :error "--format takes md or edn"}
+               :parse #(when (contains? formats %) (keyword %))
+               :error "--format takes md, edn, json or html"}
    "--days" {:key :days :parse count-value :error "--days takes a number"}
    "--top" {:key :top :parse count-value :error "--top takes a number"}
    "--exclude" {:key :exclude :parse identity :many true :error "--exclude takes a glob"}
@@ -72,10 +80,22 @@ Prints the report, or writes it to out.
 (defn- bad-usage [message]
   {:exit 2 :err (str message "\n\n" usage)})
 
-(defn- render-result [result {:keys [format top]}]
-  (if (= :edn format)
-    (pr-str result)
-    (report/render result {:top top})))
+(def ^:private renderers
+  {:md (fn [result top] (report/render result {:top top}))
+   :edn (fn [result _] (pr-str result))
+   :json (fn [result _] (json/render result))
+   :html (fn [result top] (html/render result {:top top}))})
+
+(defn- output-format
+  "The format asked for, else the one out's extension names, else Markdown."
+  [format out]
+  (or format
+      (when out
+        (get extension-formats (str/lower-case (or (second (re-find #"\.([^./\\]+)$" out)) ""))))
+      :md))
+
+(defn- render-result [result {:keys [format top]} out]
+  ((get renderers (output-format format out)) result top))
 
 (defn- analyze
   "Analyze dir, with the flags adding to what the config says."
@@ -90,7 +110,7 @@ Prints the report, or writes it to out.
 (defn- report
   "Run the analysis and put the result where it was asked to go."
   [dir out project-config opts]
-  (let [text (render-result (analyze dir project-config opts) opts)]
+  (let [text (render-result (analyze dir project-config opts) opts out)]
     (if out
       (do (spit out text)
           {:exit 0 :out (str "wrote " out)})
