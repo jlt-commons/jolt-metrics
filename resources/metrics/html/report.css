@@ -1,0 +1,142 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1f2328;
+  --muted: #59636e;
+  --line: #d1d9e0;
+  --head: #f6f8fa;
+  --code: #eff2f5;
+  --critical-bg: #ffebe9;
+  --critical-fg: #a40e26;
+  --warning-bg: #fff8c5;
+  --warning-fg: #7d4e00;
+  --accent: #0969da;
+  color-scheme: light;
+}
+
+/* Dark follows the system unless the page was switched to light; the theme
+   button sets data-theme on <html>.  The two dark blocks must stay identical. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --line: #3d444d;
+    --head: #151b23;
+    --code: #262c36;
+    --critical-bg: #4b1113;
+    --critical-fg: #ffa198;
+    --warning-bg: #3d2e00;
+    --warning-fg: #e3b341;
+    --accent: #4493f8;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0d1117;
+  --fg: #e6edf3;
+  --muted: #9198a1;
+  --line: #3d444d;
+  --head: #151b23;
+  --code: #262c36;
+  --critical-bg: #4b1113;
+  --critical-fg: #ffa198;
+  --warning-bg: #3d2e00;
+  --warning-fg: #e3b341;
+  --accent: #4493f8;
+  color-scheme: dark;
+}
+
+.toolbar { display: flex; gap: 8px; }
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 24px 16px 64px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+main { max-width: 1100px; margin: 0 auto; }
+
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; justify-content: space-between; }
+
+h1 { font-size: 1.6rem; margin: 0 0 8px; }
+
+h2 {
+  font-size: 1.2rem;
+  margin: 32px 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* sections collapse only when the script is there to do it */
+html.js h2 { cursor: pointer; user-select: none; }
+html.js h2::before { content: "\25BE"; display: inline-block; width: 1.2em; color: var(--muted); }
+html.js section.collapsed > h2::before { content: "\25B8"; }
+section.collapsed > :not(h2) { display: none; }
+
+h3 { font-size: 1rem; margin: 20px 0 8px; }
+
+code {
+  font: 0.9em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code);
+  padding: 1px 5px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+
+.scroll { overflow-x: auto; }
+
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+th, td { border: 1px solid var(--line); padding: 5px 9px; text-align: left; vertical-align: top; }
+td[data-value] { text-align: right; font-variant-numeric: tabular-nums; }
+th { background: var(--head); white-space: nowrap; }
+table.sortable th { cursor: pointer; }
+table.sortable th[data-dir="asc"]::after { content: " \25B2"; color: var(--muted); }
+table.sortable th[data-dir="desc"]::after { content: " \25BC"; color: var(--muted); }
+
+ol.queue { padding-left: 1.6em; }
+ol.queue li { margin-bottom: 10px; }
+.actions { color: var(--muted); }
+
+.badge {
+  display: inline-block;
+  padding: 0 8px;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.badge.critical { background: var(--critical-bg); color: var(--critical-fg); }
+.badge.warning { background: var(--warning-bg); color: var(--warning-fg); }
+
+.controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin-bottom: 10px; color: var(--muted); }
+.controls input[type="search"] {
+  font: inherit;
+  padding: 4px 8px;
+  min-width: 240px;
+  max-width: 100%;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+button {
+  font: inherit;
+  padding: 5px 12px;
+  color: var(--accent);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.note { color: var(--muted); }
+
+/* controls that need the script stay hidden until it runs */
+html:not(.js) .needs-js { display: none; }

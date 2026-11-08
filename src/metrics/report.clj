@@ -7,7 +7,7 @@
   "How many queue entries to show; EDN output always has them all."
   25)
 
-(defn- fmt
+(defn fmt
   "A number for display: integer when exact, one decimal otherwise; nil for absent."
   [x]
   (cond
