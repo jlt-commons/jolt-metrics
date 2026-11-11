@@ -1,7 +1,8 @@
 (ns metrics.queue
   "The refactoring queue: the definitions and files over a threshold, worst first,
   each with the rules it broke and what to do about it."
-  (:require [metrics.rules :as rules]))
+  (:require [metrics.rules :as rules]
+            [metrics.calls :as calls]))
 
 (def function-limits
   "[good ok warning] per function, where higher is worse.  Above ok is a warning
@@ -67,7 +68,10 @@
    :nesting (:nesting f)
    :params (:params f)
    :lines (get-in f [:locs :sloc])
-   :maintainability (:maintainability-index-without-comments f)})
+   :maintainability (:maintainability-index-without-comments f)
+   :fan-in (:fan-in f)
+   :fan-out (:fan-out f)
+   :reach (:reach f)})
 
 (defn- function-violations [metrics]
   (vec (keep identity
@@ -108,15 +112,18 @@
         :let [metrics (function-metrics f)
               violations (function-violations metrics)]
         :when (seq violations)]
-    (entry {:kind (:kind f)
-            :name (:name f)
-            :path (:path file)
-            :line (:line f)
-            :end-line (:end-line f)
-            :metrics metrics
-            :changes (:changes file)}
-           violations
-           risk)))
+    (update
+     (entry {:kind (:kind f)
+             :name (:name f)
+             :path (:path file)
+             :line (:line f)
+             :end-line (:end-line f)
+             :metrics metrics
+             :changes (:changes file)}
+            violations
+            risk)
+     ;; what depends on it breaks with it, so the more that does, the sooner
+     :score * (calls/reach-factor (or (:reach f) 0)))))
 
 (defn- file-entry
   "A file's own entry; a long test file is not a problem to refactor."

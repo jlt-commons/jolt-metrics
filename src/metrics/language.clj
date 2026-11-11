@@ -8,6 +8,9 @@
                      shapes metrics.reader's walker understands
     :scan            source text to line classes and list extents; see metrics.scanner
     :unused-public?  can a public function nothing mentions be called unused?
+    :index           optional: path and source text to a jolt-lsp analysis, which
+                     puts the file's functions in the call graph; see
+                     metrics.callgraph
 
   Adding a language means writing an adapter and listing it here."
   (:require [metrics.clojure :as clojure-language]

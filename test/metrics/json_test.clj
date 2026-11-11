@@ -23,7 +23,8 @@
     (is (= "function" (get f "kind")))
     (is (contains? f "end_line"))
     (is (some #(= "lines" (get % "rule")) (get f "violations")))
-    (is (= #{"cyclomatic" "cognitive" "nesting" "lines" "params" "maintainability"}
+    (is (= #{"cyclomatic" "cognitive" "nesting" "lines" "params" "maintainability"
+             "fan_in" "fan_out" "reach"}
            (set (keys (get f "metrics")))))))
 
 (deftest no-history-means-null-hotspots

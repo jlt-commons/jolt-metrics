@@ -37,16 +37,22 @@
    [:params #(plural % "param")]
    [:maintainability #(str "MI " %)]])
 
+(defn reach-figure
+  "How many functions depend on this one, when any do."
+  [{:keys [reach]}]
+  (when (and reach (pos? reach)) (str ", reach " reach)))
+
 (defn- function-figures
   "A function's numbers, in bold where they broke a rule."
   [{:keys [metrics violations]}]
   (let [broken (set (map :rule violations))]
-    (apply str
-           (interpose
-            ", "
-            (for [[k label] metric-labels]
-              (let [text (label (fmt (get metrics k)))]
-                (if (contains? broken k) (str "**" text "**") text)))))))
+    (str (apply str
+                (interpose
+                 ", "
+                 (for [[k label] metric-labels]
+                   (let [text (label (fmt (get metrics k)))]
+                     (if (contains? broken k) (str "**" text "**") text)))))
+         (reach-figure metrics))))
 
 (defn- file-figure [{:keys [rule value]}]
   (case rule

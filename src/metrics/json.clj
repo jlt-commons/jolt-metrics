@@ -51,8 +51,9 @@
 
 (defn- function-metrics [metrics]
   (when metrics
-    (into {} (map (fn [k] [(name k) (get metrics k)]))
-          [:cyclomatic :cognitive :nesting :lines :params :maintainability])))
+    (into {} (map (fn [k] [(str/replace (name k) "-" "_") (get metrics k)]))
+          [:cyclomatic :cognitive :nesting :lines :params :maintainability
+           :fan-in :fan-out :reach])))
 
 (defn- finding [i e]
   {"rank" (inc i)

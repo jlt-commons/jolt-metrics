@@ -16,6 +16,7 @@
             [metrics.queue :as queue]
             [metrics.cleanup :as cleanup]
             [metrics.entropy :as entropy]
+            [metrics.callgraph :as callgraph]
             [jolt.fs :as fs]))
 
 (defn- average
@@ -151,7 +152,8 @@
       :entropy (entropy/entropy ws)
       :word-counts (frequencies ws)
       :functions (mapv #(dissoc % :halstead) fns)
-      :halstead file-h}
+      :halstead file-h
+      :index-analysis (when-let [index (:index lang)] (index path source))}
      (file-scores model fns)
      (index-fields (file-index fns (:volume file-h) locs)))))
 
@@ -243,7 +245,8 @@
   "A file's metrics without what only the cleanup and queue passes needed."
   [file]
   (-> file
-      (dissoc :symbols :qualifiers :libspecs :unused-public? :load-paths :word-counts)
+      (dissoc :symbols :qualifiers :libspecs :unused-public? :load-paths :word-counts
+              :index-analysis)
       (update :functions (fn [fns] (mapv #(dissoc % :self-refs) fns)))))
 
 (defn- load-all
@@ -317,7 +320,8 @@
   (let [{:keys [files errors]} (load-all loaders)
         edges (dependency-edges files root)
         files (assoc-surprisal
-               (annotated-files files edges changes #(mark-test-file % root test-paths)))
+               (callgraph/annotate
+                (annotated-files files edges changes #(mark-test-file % root test-paths))))
         risk-of (risk-fn files)
         result-files (mapv public-file files)]
     {:files result-files
