@@ -10,6 +10,10 @@
          :git/tag "v0.2.1"
          :git/sha "3c47a5be833c8263a132466ce53eb87e9f62415e"}}
 
+ :tasks
+ {dist  {:doc "build the standalone jolt-lsp binary"
+         :task (shell "jolt" "build" "-m" "metrics.cli" "-o" "target/jolt-metrics")}}
+ 
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps  {io.github.jlt-commons/writ
