@@ -111,11 +111,13 @@
 
 (defn- function-figures [{:keys [metrics violations]}]
   (let [broken (set (map :rule violations))]
-    (interpose ", "
-               (for [[k prefix noun] metric-labels
-                     :let [v (get metrics k)
-                           text (if noun (plural (report/fmt v) noun) (str prefix (report/fmt v)))]]
-                 (if (contains? broken k) [:strong text] text)))))
+    (list
+     (interpose ", "
+                (for [[k prefix noun] metric-labels
+                      :let [v (get metrics k)
+                            text (if noun (plural (report/fmt v) noun) (str prefix (report/fmt v)))]]
+                  (if (contains? broken k) [:strong text] text)))
+     (report/reach-figure metrics))))
 
 (defn- file-figure [{:keys [rule value]}]
   [:strong (case rule

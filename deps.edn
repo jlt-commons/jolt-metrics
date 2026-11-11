@@ -1,7 +1,14 @@
-{:paths ["src" "resources"]
+{:jolt/min-version "0.8.25"
+ :paths ["src" "resources"]
 
  ;; the HTML report inlines resources/metrics/html, so the binary carries it
  :jolt/build {:embed ["resources"]}
+
+ ;; the index behind the call-graph metrics: resolved references between vars
+ :deps {io.github.jlt-commons/jolt-lsp
+        {:git/url "https://github.com/jlt-commons/jolt-lsp"
+         :git/tag "v0.2.1"
+         :git/sha "3c47a5be833c8263a132466ce53eb87e9f62415e"}}
 
  :aliases
  {:test {:extra-paths ["test"]

@@ -16,7 +16,7 @@ on:
 
 # pinned: a new release would change what CI runs on
 env:
-  JOLT_VERSION: v0.8.24
+  JOLT_VERSION: v0.8.26
 
 permissions:
   contents: read

@@ -23,7 +23,7 @@ source ──► normalized model ──► pure metric visitors ──► queue
                                 maintainability.clj      cleanup.clj json.clj
                                 cyclomatic.clj                      html.clj
                                 cognitive.clj
-                                coupling.clj
+                                coupling.clj, calls.clj
                                 hotspot.clj, rules.clj
                                 entropy.clj (unusual changes and files)
                                 loc.clj (over scanner's line classes)
@@ -38,7 +38,14 @@ source ──► normalized model ──► pure metric visitors ──► queue
 - **`metrics.*`** metric namespaces are pure and writ-constrained: single-arity
   fns, no interop, recursion only via `case`-destructured fields of a `data`
   type (or `rest`/`dec` under a test). They never mention writ and never do I/O.
-- **`metrics.core`** orchestrates parse → per-file → coupling → queue → summary.
+- **`metrics.core`** orchestrates parse → per-file → coupling → call graph → queue
+  → summary.
+- **`metrics.callgraph`** is plain Clojure glue over jolt-lsp: an adapter's optional
+  `:index` fn (only Clojure's has one) turns source into a jolt-lsp analysis, and
+  `annotate` builds the index from those analyses alone (`db/build-from-analyses`,
+  tests left out) and puts `:fan-in`, `:fan-out` and `:reach` on each function.
+  The counting and the queue weight (`reach-factor`) live in the writ-checked
+  `metrics.calls`. Methods, helpers and Scheme get nil.
 - **`metrics.paths`** handles globs and resolving loaded files; **`metrics.config`**
   reads `.jolt-metrics.edn`.
 - **`metrics.queue`** holds the thresholds and ranks the findings; **`metrics.cleanup`**

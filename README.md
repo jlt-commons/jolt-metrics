@@ -21,6 +21,7 @@ stated contract, not just unit tests.
 | **Maintainability index** | `metrics.maintainability` | composite: Halstead volume + cyclomatic + LOC |
 | **Nesting depth** | `metrics.cognitive` | how deeply control structures nest |
 | **Coupling / instability** | `metrics.coupling` | afferent/efferent coupling and instability |
+| **Fan-in / fan-out / reach** | `metrics.calls` | per function: how many functions refer to it, how many it refers to, and how many depend on it at any distance (Clojure only) |
 | **Hotspot risk** | `metrics.hotspot` | how complex a file is and how often it changes |
 | **Unusual changes** | `metrics.entropy` | commits that changed the code's information content far more than usual |
 | **Entropy / surprisal** | `metrics.entropy` | a file's word entropy, and how unexpected its words are given the rest of the project |
@@ -108,7 +109,11 @@ in either are still checked.
 2. **Files not analyzed**: anything unreadable, with the reason.
 3. **Refactoring queue**: functions and files over a threshold, worst first. Each
    entry has its location and line range, its numbers with the broken ones in bold,
-   and what to do about it. Tests aren't queued.
+   and what to do about it. Tests aren't queued. A function's score is weighed by
+   its reach, how many functions depend on it at any distance, so a complex
+   function everything goes through ranks above an equally complex one nothing
+   calls. The weight rises on a log scale from 1 with no dependents to 2 at 100
+   and stays there; 100 is our choice.
 4. **Hotspots**: complex files that keep changing. Their contents rank higher in
    the queue.
 5. **Unusual changes**: commits that put far more information into the code, or
@@ -224,8 +229,9 @@ where EDN is 130 KB.
 
 Keys are snake_case and always present, and so are values that were keywords
 (`"file_lines"`). Lists are empty, never missing. A function finding's `metrics` has
-`cyclomatic`, `cognitive`, `nesting`, `lines`, `params` and `maintainability`; a
-file finding's is `null`. Numbers that aren't whole are rounded to 3 decimals, and
+`cyclomatic`, `cognitive`, `nesting`, `lines`, `params`, `maintainability`,
+`fan_in`, `fan_out` and `reach` (the last three `null` outside Clojure); a file
+finding's is `null`. Numbers that aren't whole are rounded to 3 decimals, and
 one JSON can't hold (NaN, infinity) is `null`.
 
 ### HTML
@@ -302,6 +308,11 @@ source ──► normalized model ──► pure metric visitors ──► queue
   never read files and never mention writ.
 - **`metrics.core`** orchestrates: parse, compute per-definition and per-file
   metrics, resolve coupling across files, and roll the project up.
+- **`metrics.callgraph`** builds [jolt-lsp](https://github.com/jlt-commons/jolt-lsp)'s
+  index from the Clojure files the analyzer collected, tests left out, and gives
+  each function its fan-in, fan-out and reach from the resolved references
+  between the project's vars. A reference counts whether it calls a function or
+  passes it on.
 - **`metrics.queue`** and **`metrics.cleanup`** turn the numbers into work.
 - **`metrics.git`** reads churn and each commit's entropy change. It is the only
   part that shells out.
