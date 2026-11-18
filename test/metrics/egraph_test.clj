@@ -73,3 +73,13 @@
         g (eg/rebuild (eg/union g a b))
         g (eg/rebuild (eg/union g a x))]
     (is (<= (apply max (map #(links g %) [a b x])) 1))))
+
+(deftest a-union-that-makes-a-class-local-makes-its-parents-local
+  (let [[g a] (eg/add-term eg/empty-graph (leaf "a"))
+        [g fa] (eg/add-term g [[:list 2] (leaf "f") [:class a]])
+        [g gfa] (eg/add-term g [[:list 2] (leaf "g") [:class fa]])
+        [g l] (eg/add-term g [[:local "x"]])
+        g (eg/rebuild (eg/union g a l))]
+    (is (eg/local? g a))
+    (is (eg/local? g fa))
+    (is (eg/local? g gfa))))

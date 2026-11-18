@@ -162,9 +162,25 @@
             (assoc-in [:classes root] merged)
             (update :pending conj root))))))
 
+(defn- spread-local
+  "g with the parents of id's class marked as mentioning a local when it does.
+  A parent that changes is queued, so the mark reaches its parents in turn."
+  [g id]
+  (if (local? g id)
+    (reduce (fn [g [_ pid]]
+              (let [pid (find g pid)]
+                (if (local? g pid)
+                  g
+                  (-> g
+                      (assoc-in [:classes pid :local?] true)
+                      (update :pending conj pid)))))
+            g (get-in g [:classes (find g id) :parents]))
+    g))
+
 (defn- repair
   "g with the parents of id's class re-canonicalized: stale hashcons entries
-  replaced, and parents that are now the same e-node merged."
+  replaced, parents that are now the same e-node merged, and a local the union
+  brought in passed up to them."
   [g id]
   (let [id (find g id)
         parents (get-in g [:classes id :parents])
@@ -179,7 +195,7 @@
                              [g (assoc seen node (find g pid))]))
                          [g {}] parents)
         id (find g id)]
-    (assoc-in g [:classes id :parents] (vec seen))))
+    (spread-local (assoc-in g [:classes id :parents] (vec seen)) id)))
 
 (defn- canonical-nodes
   "g with every class's nodes canonical and deduplicated."
