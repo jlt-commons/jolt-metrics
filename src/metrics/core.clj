@@ -194,12 +194,14 @@
 
 (defn- risk-fn
   "A function giving a file's hotspot risk, or nil when it has too few changes to
-  say anything.  Test files aren't hotspots, and don't set the scale either."
+  say anything.  Test files aren't hotspots, and don't set the scale either.  The
+  scale is the project's most changes and complexity, or the floors when those
+  are higher, so a small project's top file isn't a hotspot for being on top."
   [limits files]
   (let [code (remove :test? files)
-        max-changes (reduce max 0 (keep :changes code))
-        max-complexity (reduce max 0 (map :cyclomatic code))
-        min-changes (get-in limits [:hotspot :min-changes])]
+        {:keys [min-changes changes-floor complexity-floor]} (:hotspot limits)
+        max-changes (reduce max changes-floor (keep :changes code))
+        max-complexity (reduce max complexity-floor (map :cyclomatic code))]
     (fn [{:keys [changes cyclomatic test?]}]
       (when (and changes (not test?) (>= changes min-changes))
         (hotspot/risk max-changes max-complexity changes cyclomatic)))))

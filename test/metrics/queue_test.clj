@@ -124,9 +124,14 @@
 
 ;; --- churn ---------------------------------------------------------------
 
+;; the floors keep small projects off the corner; these tests are of the
+;; scaling itself, so they scale by the files alone
+(def ^:private relative {:hotspot {:changes-floor 0 :complexity-floor 0}})
+
 (deftest churn-raises-priority
   (let [src [["a.clj" (branchy "a" 12)] ["b.clj" (branchy "b" 12)]]
-        q (:queue (core/analyze-files src {:changes {"b.clj" 8 "a.clj" 1} :days 90}))]
+        q (:queue (core/analyze-files src {:changes {"b.clj" 8 "a.clj" 1} :days 90
+                                           :thresholds relative}))]
     (is (= ["b" "a"] (map :name (filter #(= :function (:kind %)) q))))
     (is (= 8 (:changes (first (filter #(= "b" (:name %)) q)))))))
 
@@ -135,7 +140,8 @@
              ["cold.clj" (branchy "cold" 12)]
              ["busy.clj" "(defn busy [x] (inc x))"]]
         {:keys [hotspots]} (core/analyze-files
-                            src {:changes {"hot.clj" 10 "cold.clj" 1 "busy.clj" 10} :days 90})]
+                            src {:changes {"hot.clj" 10 "cold.clj" 1 "busy.clj" 10} :days 90
+                                 :thresholds relative})]
     (is (= "hot.clj" (:path (first hotspots))))
     (is (= 1.0 (:risk (first hotspots))))
     (is (not-any? #(= "cold.clj" (:path %)) hotspots) "too few changes to matter")))
@@ -147,9 +153,24 @@
 
 (deftest a-hot-file-is-queued
   (let [src [["hot.clj" (branchy "hot" 8)] ["other.clj" (branchy "other" 3)]]
-        q (:queue (core/analyze-files src {:changes {"hot.clj" 10 "other.clj" 3} :days 90}))
+        q (:queue (core/analyze-files src {:changes {"hot.clj" 10 "other.clj" 3} :days 90
+                                           :thresholds relative}))
         e (first (filter #(and (= :file (:kind %)) (= "hot.clj" (:path %))) q))]
     (is (some #(= :hotspot (:rule %)) (:violations e)))))
+
+;; issue 14: a day-old library's central file, 5 changes and cyclomatic 113,
+;; the most of both, was a critical hotspot only for being on top
+(deftest a-young-projects-top-file-is-not-a-hotspot-for-being-on-top
+  (let [src [["args.clj" (branchy "args" 112)] ["other.clj" (branchy "other" 3)]]
+        changes {:changes {"args.clj" 5 "other.clj" 3} :days 90}]
+    (is (= [] (:hotspots (core/analyze-files src changes))))
+    (is (= 1.0 (:risk (first (:hotspots (core/analyze-files src (assoc changes :thresholds relative)))))))))
+
+(deftest a-file-that-keeps-changing-is-still-a-hotspot
+  (let [src [["args.clj" (branchy "args" 112)]]
+        [h] (:hotspots (core/analyze-files src {:changes {"args.clj" 20} :days 90}))]
+    (is (= "args.clj" (:path h)))
+    (is (= 1.0 (:risk h)))))
 
 ;; --- cleanup candidates ---------------------------------------------------
 

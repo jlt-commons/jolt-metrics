@@ -127,7 +127,7 @@ show them, EDN has the whole map under `:thresholds`, and JSON has it under
 | `:maintainability` | `{:warning 38.0 :critical 10.0}` | lower is worse: at or under `:warning` is a warning, under `:critical` critical |
 | `:file-lines` | `{:warning 500 :critical 1000}` | a file over these source lines |
 | `:efferent` | `{:warning 19 :critical 39}` | a file depending on more project files than these |
-| `:hotspot` | `{:warning 0.5 :critical 0.8 :min-changes 3}` | hotspot risk from `:warning` up is a warning, from `:critical` up critical; a file needs `:min-changes` recent changes to have a risk at all |
+| `:hotspot` | `{:warning 0.5 :critical 0.8 :min-changes 3 :changes-floor 20 :complexity-floor 100}` | hotspot risk from `:warning` up is a warning, from `:critical` up critical; a file needs `:min-changes` recent changes to have a risk at all; the floors are the least changes and file complexity risk is scaled by (see [Hotspots](#hotspots)) |
 | `:unusual` | `{:z 3.0}` | how many standard deviations make a commit or a file unusual |
 | `:duplicates` | `{:max-distance 0.35 :min-tokens 40}` | the largest compression distance a near-duplicate pair can have, and the fewest tokens a definition needs to be compared |
 
@@ -153,7 +153,7 @@ on unusual changes and near-duplicates.
    calls. The weight rises on a log scale from 1 with no dependents to 2 at 100
    and stays there; 100 is our choice.
 4. **Hotspots**: complex files that keep changing. Their contents rank higher in
-   the queue.
+   the queue. See below.
 5. **Unusual changes**: commits that put far more information into the code, or
    took far more out, than the ones before them. See below.
 6. **Unusual files**: files whose words are far more surprising than the
@@ -189,6 +189,28 @@ Taken literally, the guide's 10 lines flags a quarter of the functions in the
 Clojure projects we measured, while 20 flags about one in ten. These limits are
 rules of thumb rather than research results; even NIST calls the exact number
 "somewhat controversial".
+
+### Hotspots
+
+A file's risk combines how often it changed in the last `--days` (90 by default)
+and its cyclomatic complexity, each scaled to 0..1, as ast-metrics does: risk is
+1 minus the distance to the corner where both are highest. ast-metrics scales by
+the project's own maxima, so in any project the file with the most changes and the
+most complexity scores 1.0, a critical, however modest its numbers. In a young
+project that is the central file, and refactoring it can't clear it, since every
+refactor commit is another change
+([#14](https://github.com/jlt-commons/jolt-metrics/issues/14)).
+
+So each axis is scaled by the project's maximum or a floor, whichever is higher:
+20 changes in the window and a file cyclomatic complexity of 100. A file has to
+change about as often as a busy project's busiest files, and be about as complex
+as the most complex tenth of files in the mature Clojure projects we measured
+(clojure-lsp, babashka, newsroom), to reach the corner. A project whose top files
+pass the floors is scored as before. A day-old library's central file, at 5
+changes and complexity 113, has risk 0.25 rather than 1.0, and becomes a hotspot
+again only if it keeps changing. `:changes-floor` and `:complexity-floor` under
+`:hotspot` in the config change the floors; set both to 0 for the purely relative
+score. If you run with a much shorter `--days`, lower `:changes-floor` with it.
 
 ### Unusual changes
 
