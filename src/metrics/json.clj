@@ -3,7 +3,8 @@
   stays put.  Keys are snake_case and always present, and schema-version changes
   when the shape does.  EDN output is the full result; this is a projection of it."
   (:require [clojure.data.json :as json]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [metrics.thresholds :as thresholds]))
 
 (def schema-version
   "Bumped whenever a key is removed or changes meaning."
@@ -44,7 +45,9 @@
      "cognitive_total" (:cognitive summary)
      "maintainability_avg" (:avg-maintainability summary)
      "instability_avg" (:avg-instability summary)
-     "entropy_avg" (:avg-entropy summary)}))
+     "entropy_avg" (:avg-entropy summary)
+     "redundancy_avg" (:avg-redundancy summary)
+     "duplicates" (:duplicates summary)}))
 
 (defn- violation [{:keys [rule value limit band]}]
   {"rule" rule "value" value "limit" limit "band" band})
@@ -89,6 +92,9 @@
 (defn- named-place [{:keys [path name line]}]
   {"path" path "name" name "line" line})
 
+(defn- named-span [{:keys [path name line end-line]}]
+  {"path" path "name" name "line" line "end_line" end-line})
+
 (defn- cleanup [{:keys [unused-requires unused-private unused-public]}]
   {"unused_requires" (mapv unused-require unused-requires)
    "unused_private" (mapv named-place unused-private)
@@ -110,7 +116,17 @@
    "instability_band" (:instability-band f)
    "changes" (:changes f)
    "entropy" (:entropy f)
-   "surprisal" (:surprisal f)})
+   "surprisal" (:surprisal f)
+   "compressed_size" (:compressed-size f)
+   "redundancy" (:redundancy f)})
+
+(defn- snake [k] (str/replace (name k) "-" "_"))
+
+(defn- limits
+  "The limits the report was judged by, keys in snake_case."
+  [result]
+  (into {} (for [[k limits] (or (:thresholds result) thresholds/defaults)]
+             [(snake k) (into {} (for [[sub v] limits] [(snake sub) v]))])))
 
 (defn report
   "The lean report for an analysis result, as data with string keys."
@@ -125,6 +141,10 @@
     "unusual_files" (mapv (fn [{:keys [path surprisal z words]}]
                             {"path" path "surprisal" surprisal "z" z "words" words})
                           (:unusual-files result))
+    "duplicates" (mapv (fn [{:keys [distance a b]}]
+                         {"distance" distance "a" (named-span a) "b" (named-span b)})
+                       (:duplicates result))
+    "thresholds" (limits result)
     "cleanup" (cleanup (:cleanup result))
     "errors" (mapv (fn [{:keys [path error]}] {"path" path "error" error}) (:errors result))
     "files" (mapv file-row (sort-by :path (:files result)))

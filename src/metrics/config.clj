@@ -4,16 +4,20 @@
     {:exclude [\"vendor/**\" \"**/generated/*\"]
      :test-paths [\"test\" \"bench\"]
      :api-namespaces [\"my.lib\" \"my.lib.api.*\"]
-     :api-paths [\"src/my/lib/core\"]}
+     :api-paths [\"src/my/lib/core\"]
+     :thresholds {:cyclomatic {:warning 8 :critical 15}}}
 
-  Patterns are relative to that directory.  It is data, read as EDN, so it can't run
-  anything."
+  Patterns are relative to that directory, and metrics.thresholds says what
+  :thresholds takes.  It is data, read as EDN, so it can't run anything."
   (:require [clojure.edn :as edn]
+            [metrics.thresholds :as thresholds]
             [jolt.fs :as fs]))
 
 (def file-name ".jolt-metrics.edn")
 
-(def ^:private known-keys #{:exclude :test-paths :api-namespaces :api-paths})
+(def ^:private list-keys #{:exclude :test-paths :api-namespaces :api-paths})
+
+(def ^:private known-keys (conj list-keys :thresholds))
 
 (defn- problem
   "What is wrong with a parsed config, or nil."
@@ -24,8 +28,8 @@
     (cond
       (not (map? config)) "it should be a map"
       (seq unknown) (str "unknown keys: " (pr-str (vec unknown)))
-      (not (every? lists? known-keys)) (str (pr-str (vec known-keys)) " take lists of strings")
-      :else nil)))
+      (not (every? lists? list-keys)) (str (pr-str (vec list-keys)) " take lists of strings")
+      :else (thresholds/problem (:thresholds config)))))
 
 (defn- parse
   "The config in a file, or {:error message}."

@@ -182,6 +182,23 @@
     (is (= 2 (:exit (cli/run [not-a-list]))))
     (is (= 2 (:exit (cli/run ["src" "--config" "/nonexistent/x.edn"]))))))
 
+(deftest a-config-can-set-thresholds
+  (let [branchy "(defn f [x] (cond (= x 1) 1 (= x 2) 2 (= x 3) 3 :else 0))"
+        dir (temp-project [["a.clj" branchy]
+                           [".jolt-metrics.edn" "{:thresholds {:cyclomatic {:warning 2 :critical 3}}}"]])
+        data (read-string (:out (cli/run [dir "--format" "edn" "--no-git"])))
+        md (:out (cli/run [dir "--no-git"]))]
+    (is (= ["f"] (map :name (:queue data))))
+    (is (= {:warning 2 :critical 3} (get-in data [:thresholds :cyclomatic])))
+    (is (str/includes? md "| Cyclomatic complexity | > 2 | > 3 |"))))
+
+(deftest bad-thresholds-are-an-error
+  (let [dir (temp-project [["a.clj" "(ns a)"]
+                           [".jolt-metrics.edn" "{:thresholds {:nesting {:warning 9 :critical 2}}}"]])
+        {:keys [exit err]} (cli/run [dir])]
+    (is (= 2 exit))
+    (is (str/includes? err ":nesting :warning should be at most its :critical"))))
+
 (deftest a-config-cannot-run-code
   (let [dir (temp-project [["a.clj" "(ns a)"] [".jolt-metrics.edn" "{:exclude #=(+ 1 2)}"]])]
     (is (= 2 (:exit (cli/run [dir]))))))

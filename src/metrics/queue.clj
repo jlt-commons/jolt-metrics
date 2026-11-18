@@ -1,31 +1,9 @@
 (ns metrics.queue
   "The refactoring queue: the definitions and files over a threshold, worst first,
-  each with the rules it broke and what to do about it."
+  each with the rules it broke and what to do about it.  The thresholds are
+  metrics.thresholds' map, a project's own merged over the defaults."
   (:require [metrics.rules :as rules]
             [metrics.calls :as calls]))
-
-(def function-limits
-  "[good ok warning] per function, where higher is worse.  Above ok is a warning
-  and above warning is critical.  The README lists where each limit comes from."
-  {:cyclomatic [5 10 20]
-   :cognitive [5 15 25]
-   :nesting [2 3 5]
-   :params [3 4 7]
-   :lines [10 20 50]})
-
-(def file-limits
-  "[good ok warning] per file: source lines as in metripy, dependencies as in
-  ast-metrics."
-  {:file-lines [200 500 1000]
-   :efferent [10 19 39]})
-
-(def hotspot-limits
-  "The risk that makes a file a hotspot, and the risk that makes it critical."
-  {:warning 0.5 :critical 0.8})
-
-(def min-hotspot-changes
-  "Fewer changes than this say nothing about where the work is going."
-  3)
 
 (def ^:private actions
   {:hotspot "It is complex and keeps changing, so refactor it first, with tests in place."
@@ -43,24 +21,31 @@
 
 (def ^:private band-weight {:warning 1 :critical 3})
 
+(defn- violation
+  "The rule broken, or nil when band b is not flagged."
+  [rule value b limits]
+  (when (rules/flagged? b)
+    {:rule rule
+     :value value
+     :limit (get limits b)
+     :band b}))
+
 (defn- limit-violation
-  "A violation of the [good ok warning] limits, or nil if value is within them."
-  [rule [good ok warning] value]
-  (let [b (rules/band good ok warning value)]
-    (when (rules/flagged? b)
-      {:rule rule
-       :value value
-       :limit (if (= :critical b) warning ok)
-       :band b})))
+  "A violation of a count's limits, where higher is worse, or nil."
+  [thresholds rule value]
+  (let [{:keys [warning critical] :as limits} (get thresholds rule)]
+    (when value
+      (violation rule value (rules/band warning critical value) limits))))
 
-(def ^:private mi-limits
-  {:warning 38.0 :critical 10.0})
+(defn- mi-violation [thresholds mi]
+  (let [{:keys [warning critical] :as limits} (:maintainability thresholds)]
+    (when mi
+      (violation :maintainability mi (rules/low-band (double warning) (double critical) mi) limits))))
 
-(defn- mi-violation [mi]
-  (when mi
-    (let [b (rules/mi-band mi)]
-      (when (rules/flagged? b)
-        {:rule :maintainability :value mi :limit (get mi-limits b) :band b}))))
+(defn- hotspot-violation [thresholds risk]
+  (let [{:keys [warning critical] :as limits} (:hotspot thresholds)]
+    (when risk
+      (violation :hotspot risk (rules/from-band (double warning) (double critical) risk) limits))))
 
 (defn- function-metrics [f]
   {:cyclomatic (:cyclomatic f)
@@ -73,26 +58,18 @@
    :fan-out (:fan-out f)
    :reach (:reach f)})
 
-(defn- function-violations [metrics]
-  (vec (keep identity
-             (conj (mapv (fn [[rule limit]] (limit-violation rule limit (get metrics rule)))
-                         function-limits)
-                   (mi-violation (:maintainability metrics))))))
+(def ^:private function-rules [:cyclomatic :cognitive :nesting :lines :params])
 
-(defn- hotspot-violation [risk]
-  (when risk
-    (cond
-      (>= risk (:critical hotspot-limits))
-      {:rule :hotspot :value risk :limit (:critical hotspot-limits) :band :critical}
-      (>= risk (:warning hotspot-limits))
-      {:rule :hotspot :value risk :limit (:warning hotspot-limits) :band :warning}
-      :else nil)))
-
-(defn- file-violations [file risk]
+(defn- function-violations [thresholds metrics]
   (vec (keep identity
-             [(hotspot-violation risk)
-              (limit-violation :file-lines (:file-lines file-limits) (get-in file [:loc :sloc]))
-              (limit-violation :efferent (:efferent file-limits) (:efferent-coupling file))])))
+             (conj (mapv #(limit-violation thresholds % (get metrics %)) function-rules)
+                   (mi-violation thresholds (:maintainability metrics))))))
+
+(defn- file-violations [thresholds file risk]
+  (vec (keep identity
+             [(hotspot-violation thresholds risk)
+              (limit-violation thresholds :file-lines (get-in file [:loc :sloc]))
+              (limit-violation thresholds :efferent (:efferent-coupling file))])))
 
 (defn- entry
   "A queue entry from its violations.  Its score weighs them, and a file's risk
@@ -106,11 +83,11 @@
            :score (* weight (+ 1.0 (or risk 0.0)))
            :actions (vec (take 2 (keep #(when (contains? broken %) (get actions %)) action-order))))))
 
-(defn- function-entries [file risk]
+(defn- function-entries [thresholds file risk]
   (for [f (:functions file)
         :when (not= :test (:kind f))
         :let [metrics (function-metrics f)
-              violations (function-violations metrics)]
+              violations (function-violations thresholds metrics)]
         :when (seq violations)]
     (update
      (entry {:kind (:kind f)
@@ -127,8 +104,8 @@
 
 (defn- file-entry
   "A file's own entry; a long test file is not a problem to refactor."
-  [file risk]
-  (let [violations (file-violations file risk)]
+  [thresholds file risk]
+  (let [violations (file-violations thresholds file risk)]
     (when (and (seq violations) (not (:test? file)))
       [(entry {:kind :file
                :name (:path file)
@@ -142,10 +119,10 @@
 (defn hotspots
   "The files that are both complex and changing, riskiest first, as
   {:path :changes :complexity :risk}."
-  [files risk-of]
+  [thresholds files risk-of]
   (->> (for [f files
              :let [r (risk-of f)]
-             :when (and r (>= r (:warning hotspot-limits)))]
+             :when (and r (>= r (get-in thresholds [:hotspot :warning])))]
          {:path (:path f)
           :changes (:changes f)
           :complexity (:cyclomatic f)
@@ -156,11 +133,11 @@
 (defn build
   "The queue for analyzed files, worst first.  risk-of gives a file's hotspot risk,
   or nil if it has none."
-  [files risk-of]
+  [thresholds files risk-of]
   (->> files
        (mapcat (fn [f]
                  (let [r (risk-of f)]
-                   (concat (function-entries f r) (file-entry f r)))))
+                   (concat (function-entries thresholds f r) (file-entry thresholds f r)))))
        (sort-by (fn [e]
                   [(- (:score e))
                    (- (get-in e [:metrics :cognitive] 0))

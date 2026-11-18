@@ -7,7 +7,6 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [metrics.json :as json]
-            [metrics.queue :as queue]
             [metrics.report :as report]))
 
 ;; --- markup ----------------------------------------------------------------
@@ -89,7 +88,9 @@
      ["Total cognitive complexity" (:cognitive summary)]
      ["Average maintainability index (comment-free)" (:avg-maintainability summary)]
      ["Average instability" (:avg-instability summary)]
-     ["Average entropy per file" (:avg-entropy summary)]]))
+     ["Average entropy per file" (:avg-entropy summary)]
+     ["Average redundancy per file" (:avg-redundancy summary)]
+     ["Near-duplicate pairs" (:duplicates summary)]]))
 
 (defn- summary-section [summary entries]
   (section "summary" "Summary"
@@ -150,21 +151,20 @@
 
 ;; --- hotspots and cleanup --------------------------------------------------
 
-(defn- hotspots-section [{:keys [changes days hotspots]}]
+(defn- hotspots-section [{:keys [changes days hotspots] :as result}]
   (when changes
     (section "hotspots" "Hotspots"
-             [:p "Complex files that changed at least " queue/min-hotspot-changes
-              " times in the last " days " days."]
+             [:p (report/hotspots-intro (report/limits-of result) days)]
              (if (seq hotspots)
                (table {:class "sortable"} ["File" "Changes" "Cyclomatic" "Risk"]
                       (for [{:keys [path changes complexity risk]} hotspots]
                         [[:td path] (num-cell changes) (num-cell complexity) (num-cell risk)]))
                [:p [:em "none"]]))))
 
-(defn- unusual-section [{:keys [unusual-changes]}]
+(defn- unusual-section [{:keys [unusual-changes] :as result}]
   (when-let [{:keys [commits changes]} unusual-changes]
     (section "unusual" "Unusual changes"
-             [:p report/unusual-intro " Of the last " (plural commits "commit")
+             [:p (report/unusual-intro (report/limits-of result)) " Of the last " (plural commits "commit")
               " that changed analyzed code, tests aside."]
              (if (seq changes)
                (table {:class "sortable"} ["Commit" "Date" "Entropy change" "z" "Files" "Subject"]
@@ -174,13 +174,28 @@
                          (num-cell z) (num-cell (count files)) [:td subject]]))
                [:p [:em "none"]]))))
 
-(defn- unusual-files-section [{:keys [unusual-files]}]
+(defn- unusual-files-section [{:keys [unusual-files] :as result}]
   (section "unusual-files" "Unusual files"
-           [:p report/unusual-files-intro]
+           [:p (report/unusual-files-intro (report/limits-of result))]
            (if (seq unusual-files)
              (table {:class "sortable"} ["File" "Surprisal (bits a word)" "z" "Words"]
                     (for [{:keys [path surprisal z words]} unusual-files]
                       [[:td path] (num-cell surprisal) (num-cell z) (num-cell words)]))
+             [:p [:em "none"]])))
+
+(defn- duplicate-place [{:keys [path name line end-line]}]
+  [:td [:code name] " (" path ":" line "-" end-line ")"])
+
+(defn- duplicates-section [{:keys [duplicates] :as result} top]
+  (section "duplicates" "Near-duplicates"
+           [:p (report/duplicates-intro (report/limits-of result))]
+           (if (seq duplicates)
+             (list
+              (table {:class "sortable"} ["Distance" "Definition" "Near-copy"]
+                     (for [{:keys [distance a b]} (take top duplicates)]
+                       [[:td {:data-value (str (double distance))} (format "%.2f" (double distance))]
+                        (duplicate-place a) (duplicate-place b)]))
+              (more-line top (count duplicates)))
              [:p [:em "none"]])))
 
 (defn- require-item [{:keys [path lib alias refers]}]
@@ -245,24 +260,11 @@
              [:ul (for [[from to] (sort edges)] [:li [:code from] " -> " [:code to]])]
              [:p [:em "no internal dependencies"]])))
 
-(defn- threshold-rows []
-  (let [row (fn [label [_ ok warning]] [label (str "> " ok) (str "> " warning)])
-        {:keys [cyclomatic cognitive nesting lines params]} queue/function-limits
-        {:keys [file-lines efferent]} queue/file-limits]
-    [(row "Cyclomatic complexity" cyclomatic)
-     (row "Cognitive complexity" cognitive)
-     (row "Nesting depth" nesting)
-     (row "Function source lines" lines)
-     (row "Function parameters" params)
-     ["Maintainability index (comment-free)" "<= 38" "< 10"]
-     (row "File source lines" file-lines)
-     (row "File dependencies" efferent)
-     ["Hotspot risk" (str ">= " (:warning queue/hotspot-limits)) (str ">= " (:critical queue/hotspot-limits))]]))
-
-(defn- thresholds-section []
+(defn- thresholds-section [result]
   (section "thresholds" "Thresholds"
            (table {} ["Rule" "Warning" "Critical"]
-                  (for [r (threshold-rows)] (mapv (fn [c] [:td c]) r)))))
+                  (for [r (report/threshold-rows (report/limits-of result))]
+                    (mapv (fn [c] [:td c]) r)))))
 
 ;; --- the page --------------------------------------------------------------
 
@@ -295,10 +297,11 @@
    (hotspots-section result)
    (unusual-section result)
    (unusual-files-section result)
+   (duplicates-section result top)
    (cleanup-section cleanup)
    (files-section files)
    (architecture-section files edges)
-   (thresholds-section)])
+   (thresholds-section result)])
 
 (defn- body [result top]
   [:body

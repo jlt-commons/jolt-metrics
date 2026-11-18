@@ -3,7 +3,8 @@
 A code metrics library for Clojure/Jolt and Scheme source, written in Jolt. It computes
 cyclomatic complexity, cognitive complexity, Halstead metrics, the
 maintainability index, and architecture coupling, and picks out unusual commits
-from git history and files whose vocabulary doesn't fit the rest of the project. Its report leads with a ranked
+from git history, files whose vocabulary doesn't fit the rest of the project, and
+definitions that are near-copies of each other. Its report leads with a ranked
 refactoring queue, so an agent or a human can see what to clean up first and why.
 
 Every metric's computation is checked against a
@@ -25,6 +26,8 @@ stated contract, not just unit tests.
 | **Hotspot risk** | `metrics.hotspot` | how complex a file is and how often it changes |
 | **Unusual changes** | `metrics.entropy` | commits that changed the code's information content far more than usual |
 | **Entropy / surprisal** | `metrics.entropy` | a file's word entropy, and how unexpected its words are given the rest of the project |
+| **Compressed size / redundancy** | `metrics.compression` | an upper bound on a definition's or file's Kolmogorov complexity, and how much of a file is repetition |
+| **Near-duplicates** | `metrics.compression` | pairs of definitions whose normalized compression distance says one is nearly a copy of the other |
 
 ## Usage
 
@@ -73,14 +76,16 @@ evaluates the source: `#=` is a read error.
 
 ### Configuration
 
-A project can list what to leave out once, in `.jolt-metrics.edn` in the analyzed
-directory:
+A project can say what to leave out, and what limits to judge by, once, in
+`.jolt-metrics.edn` in the analyzed directory:
 
 ```clojure
 {:exclude ["vendor/**" "target/**" "src/parser_generated.clj"]
  :test-paths ["test" "bench"]
  :api-namespaces ["my.lib" "my.lib.api.*"]
- :api-paths ["src/my/lib/core"]}
+ :api-paths ["src/my/lib/core"]
+ :thresholds {:cyclomatic {:warning 8 :critical 15}
+              :duplicates {:max-distance 0.3}}}
 ```
 
 Patterns are relative to that directory, and `--exclude` adds to the list. `*` stays
@@ -103,6 +108,39 @@ dots included: `"my.lib.*"` covers `my.lib.core` and `my.lib.core.impl` but not
 `:exclude`'s, which covers files that have no `ns` form to match. Private functions
 in either are still checked.
 
+#### Thresholds
+
+`:thresholds` changes the limits the report judges by. Name only what you want to
+change: anything left out keeps its default, key by key, so
+`{:cyclomatic {:warning 8}}` keeps the critical limit of 20. Every format reports
+by the limits it used: the Markdown and HTML Thresholds tables and section notes
+show them, EDN has the whole map under `:thresholds`, and JSON has it under
+`thresholds` with snake_case keys.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `:cyclomatic` | `{:warning 10 :critical 20}` | a function over `:warning` is a warning, over `:critical` critical |
+| `:cognitive` | `{:warning 15 :critical 25}` | the same, for cognitive complexity |
+| `:nesting` | `{:warning 3 :critical 5}` | the same, for nesting depth |
+| `:lines` | `{:warning 20 :critical 50}` | the same, for a function's source lines |
+| `:params` | `{:warning 4 :critical 7}` | the same, for a function's parameters |
+| `:maintainability` | `{:warning 38.0 :critical 10.0}` | lower is worse: at or under `:warning` is a warning, under `:critical` critical |
+| `:file-lines` | `{:warning 500 :critical 1000}` | a file over these source lines |
+| `:efferent` | `{:warning 19 :critical 39}` | a file depending on more project files than these |
+| `:hotspot` | `{:warning 0.5 :critical 0.8 :min-changes 3}` | hotspot risk from `:warning` up is a warning, from `:critical` up critical; a file needs `:min-changes` recent changes to have a risk at all |
+| `:unusual` | `{:z 3.0}` | how many standard deviations make a commit or a file unusual |
+| `:duplicates` | `{:max-distance 0.35 :min-tokens 40}` | the largest compression distance a near-duplicate pair can have, and the fewest tokens a definition needs to be compared |
+
+The count limits are whole numbers, the hotspot limits and `:max-distance` lie
+between 0 and 1, and `:z` is positive. A `:warning` past its `:critical` (the other
+way round for `:maintainability`) is an error, as is an unknown key, so a typo
+can't silently keep a default. A bad config stops the run with exit code 2 and
+says what's wrong.
+
+Raising `:unusual :z` or lowering `:duplicates :max-distance` lists fewer, surer
+findings. The defaults come from the sources in the table below and the sections
+on unusual changes and near-duplicates.
+
 ### The report
 
 1. **Summary**: finding counts and project totals.
@@ -120,14 +158,16 @@ in either are still checked.
    took far more out, than the ones before them. See below.
 6. **Unusual files**: files whose words are far more surprising than the
    project's other files'. See below.
-7. **Cleanup candidates**: unused requires, and functions nothing mentions. A
+7. **Near-duplicates**: pairs of definitions that are near-copies, closest first.
+   See below.
+8. **Cleanup candidates**: unused requires, and functions nothing mentions. A
    require counts as used when anything it brings in is, so an idle alias beside a
    used `:refer` isn't listed, while referred names nobody uses are. Matching
    is by name and conservative, but runtime lookups and outside callers can't be
    seen, so check public functions before removing them, and name your API
    namespaces in the config to keep them off the list.
-8. **Files** and **Architecture**: the numbers per file, coupling, and dependencies.
-9. **Thresholds**: what the severities mean.
+9. **Files** and **Architecture**: the numbers per file, coupling, and dependencies.
+10. **Thresholds**: what the severities mean.
 
 | Rule | Warning | Critical | Where the limits come from |
 |---|---|---|---|
@@ -140,6 +180,9 @@ in either are still checked.
 | File source lines | > 500 | > 1000 | [metripy](https://github.com/zimmer-yan/metripy); [ESLint](https://eslint.org/docs/latest/rules/max-lines) uses 300 and [Checkstyle](https://checkstyle.org/checks/sizes/filelength.html) 2000 |
 | File dependencies | > 19 | > 39 | [Checkstyle](https://checkstyle.org/checks/metrics/classfanoutcomplexity.html) and PMD use 20 for classes; ast-metrics uses 20 and 40 |
 | Hotspot risk (at least 3 changes) | >= 0.5 | >= 0.8 | no published standard; these are our choice |
+
+These are the defaults; `:thresholds` in the config changes them (see
+[Thresholds](#thresholds)).
 
 Function length sits between the Clojure style guide and general-purpose tools.
 Taken literally, the guide's 10 lines flags a quarter of the functions in the
@@ -158,7 +201,7 @@ is the Shannon entropy of its word frequencies, in bits, comments included. A
 commit's change is the sum of its files' changes, and its z-score is how many
 standard deviations that sits from the mean change of every commit before it. A
 commit with at least 10 before it and a z-score over 3, either way, is listed,
-most unusual first.
+most unusual first. `:unusual :z` in the config changes the 3.
 
 Only files the report measures count, and tests don't, since the paper found test
 and generated code changes to be its false positives. Excluding generated code in
@@ -189,7 +232,7 @@ project: the bits each of its words takes, on average, under the word
 distribution of every other file, with one added to each count so a word found
 nowhere else has a finite cost. Raw entropy mostly tracks how big a file is;
 surprisal doesn't, since it's per word. A file whose surprisal is more than 3
-standard deviations above the files' mean is listed. These are files that speak a
+standard deviations above the files' mean is listed (`:unusual :z` again). These are files that speak a
 different vocabulary from their project: on babashka, a generated table of XML
 entities and a standalone example; on clj-kondo, a vendored copy of tools.reader.
 Exclude such code in the config once you've seen it, or move a concern that
@@ -201,6 +244,59 @@ directories like `test-resources` in `:test-paths` to keep them out. The paper
 proposed cross-entropy as the next measure to try but didn't evaluate it, so
 there's no published precision for this list.
 
+### Compression and near-duplicates
+
+The Kolmogorov complexity of a piece of code is the length of the shortest program
+that prints it. No program can compute it, but any compressor gives an upper bound,
+and the information-theory literature uses one in its place. Here it is DEFLATE,
+gzip's algorithm, at its best level and without a header.
+
+What gets compressed matters more than which compressor does it: Jbara and
+Feitelson, [Quantification of code regularity using preprocessing and
+compression](https://www.cs.huji.ac.il/~feit/papers/RegMet14.pdf) (2014), compared
+five compressors and four preprocessing levels and found that the preprocessing
+decides the result. So the code is compressed as a token stream, not as text:
+layout, comments and docstrings are gone, every local is renamed by where it first
+appears (`$0`, `$1`, ...), and every string or regex is a placeholder.
+`(defn mean [xs] ...)` and `(defn avg [vs] ...)` with the same body give the same
+tokens.
+
+Each definition has its `:compressed-size` in bytes. Each file has its own, for all
+of its code together, and its `:redundancy`: the share of its token stream that
+compression removes, from 0 up to 1. A file of repeated shapes, boilerplate or
+copies, rates high. The summary has the average over the files that aren't tests.
+
+Two definitions are near-duplicates when their normalized compression distance
+(Li, Chen, Li, Ma and Vitányi, [The similarity
+metric](https://arxiv.org/abs/cs/0111054), 2004),
+
+```
+NCD(x, y) = (C(xy) - min(C(x), C(y))) / max(C(x), C(y))
+```
+
+is at most 0.35. NCD is 0 when compressing one says everything about the other
+and near 1 when it says nothing. Ishio, Maeda, Shibuya and Inoue, [Cloned buggy
+code detection in practice using normalized compression
+distance](https://naist-se.github.io/pastpublications/naistse-1259.pdf),
+use the same measure over token streams with DEFLATE to find cloned code, and
+NEC deployed it. The 0.35 is our choice, from reading the pairs found in
+clojure-lsp: at that distance two definitions share most of their code and differ
+in a call, a keyword or a few arguments. Definitions under 40 tokens are left out,
+because compression overhead dominates there and short repeats are idioms rather
+than copies. Tests, and pairs where one definition is a helper inside the other,
+are left out too. `:duplicates` in the config changes the 0.35 (`:max-distance`)
+and the 40 (`:min-tokens`).
+
+Comparing every pair of definitions is quadratic, so two cheap tests rule out most
+pairs before anything is compressed. The first is size: NCD is at least the gap
+between two sizes over the larger, so definitions that compress to very different
+sizes can't be near-duplicates. The second is a MinHash estimate of the token
+trigrams two definitions share; pairs estimated under 12% shared are skipped.
+That second test is an estimate, so a pair that only just qualifies can be missed,
+though definitions with the same tokens never are. On clojure-lsp's 1334
+functions it found the same 54 pairs as comparing every pair, in about a second
+of CPU time; the rest of the analysis takes about six.
+
 ### JSON
 
 `--format json` is the lean report: what to act on, in a shape tools can rely on.
@@ -210,21 +306,24 @@ where EDN is 130 KB.
 
 ```json
 {"tool": "jolt-metrics", "schema_version": 1,
- "summary": {...}, "findings": [...], "hotspots": [...], "cleanup": {...},
+ "summary": {...}, "findings": [...], "hotspots": [...], "duplicates": [...],
+ "thresholds": {...}, "cleanup": {...},
  "errors": [...], "files": [...], "dependencies": [...]}
 ```
 
 | Key | Holds |
 |---|---|
 | `schema_version` | 1; it goes up when a key is removed or changes meaning |
-| `summary` | `critical`, `warnings`, `files`, `files_not_analyzed`, `loc`, `sloc`, `cloc`, `functions`, `cyclomatic_total`, `cyclomatic_avg`, `cognitive_total`, `maintainability_avg`, `instability_avg`, `entropy_avg` |
+| `summary` | `critical`, `warnings`, `files`, `files_not_analyzed`, `loc`, `sloc`, `cloc`, `functions`, `cyclomatic_total`, `cyclomatic_avg`, `cognitive_total`, `maintainability_avg`, `instability_avg`, `entropy_avg`, `redundancy_avg`, `duplicates` (how many pairs) |
 | `findings` | the whole queue, worst first and never capped by `--top`: `rank`, `severity`, `kind`, `name`, `path`, `line`, `end_line`, `changes`, `score`, `metrics`, `violations` (`rule`, `value`, `limit`, `band`), `actions` |
 | `hotspots` | `path`, `changes`, `complexity`, `risk`; `null` under `--no-git` |
 | `unusual_changes` | `commits` (how many were checked) and `changes`, most unusual first: `commit`, `date`, `subject`, `delta` (bits), `z`, `files`; `null` under `--no-git` |
 | `unusual_files` | `path`, `surprisal` (bits a word), `z`, `words`, most surprising first |
+| `duplicates` | `distance`, and `a` and `b`, each `path`, `name`, `line`, `end_line`; closest first |
+| `thresholds` | the limits the report used, as in [Thresholds](#thresholds), keys in snake_case: `cyclomatic`, ..., `file_lines`, `hotspot` (`warning`, `critical`, `min_changes`), `unusual` (`z`), `duplicates` (`max_distance`, `min_tokens`) |
 | `cleanup` | `unused_requires` (`path`, `lib`, `alias`, `refers`), `unused_private` and `unreferenced_public` (`path`, `name`, `line`) |
 | `errors` | `path`, `error` for each file not analyzed |
-| `files` | `path`, `language`, `namespace`, `loc`, `sloc`, `cloc`, `cyclomatic`, `cognitive`, `maintainability`, `efferent`, `afferent`, `instability`, `instability_band`, `changes`, `entropy`, `surprisal` |
+| `files` | `path`, `language`, `namespace`, `loc`, `sloc`, `cloc`, `cyclomatic`, `cognitive`, `maintainability`, `efferent`, `afferent`, `instability`, `instability_band`, `changes`, `entropy`, `surprisal`, `compressed_size` (bytes), `redundancy` |
 | `dependencies` | `from`, `to` |
 
 Keys are snake_case and always present, and so are values that were keywords
@@ -293,7 +392,7 @@ source ──► normalized model ──► pure metric visitors ──► queue
   (reader, scanner)             halstead, mi, loc,       (queue,   (report)
                                 cyclomatic, cognitive,   cleanup)
                                 coupling, hotspot,
-                                entropy
+                                entropy, compression
 ```
 
 - **`metrics.reader`** parses Clojure/Jolt forms into a normalized model: each
@@ -306,6 +405,10 @@ source ──► normalized model ──► pure metric visitors ──► queue
   discards, and where each list ends.
 - **`metrics.*`** metric namespaces are pure functions over that model. They
   never read files and never mention writ.
+- **`metrics.tokens`** turns forms into the token stream compression measures.
+  **`metrics.deflate`** (the compressor) and **`metrics.minhash`** (the pair
+  pre-filter, on arrays for speed) are the host code `metrics.compression` uses,
+  kept apart so that what writ checks stays pure.
 - **`metrics.core`** orchestrates: parse, compute per-definition and per-file
   metrics, resolve coupling across files, and roll the project up.
 - **`metrics.callgraph`** builds [jolt-lsp](https://github.com/jlt-commons/jolt-lsp)'s
@@ -314,6 +417,8 @@ source ──► normalized model ──► pure metric visitors ──► queue
   between the project's vars. A reference counts whether it calls a function or
   passes it on.
 - **`metrics.queue`** and **`metrics.cleanup`** turn the numbers into work.
+  **`metrics.thresholds`** holds the limits the queue and the findings go by: the
+  defaults, merged with a project's own and checked.
 - **`metrics.git`** reads churn and each commit's entropy change. It is the only
   part that shells out.
 - **`metrics.report`** renders Markdown, **`metrics.json`** the lean JSON, and

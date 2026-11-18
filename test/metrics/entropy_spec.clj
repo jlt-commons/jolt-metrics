@@ -8,13 +8,13 @@
   entropy of its word frequencies, in bits.  A commit's change is the sum of
   its files' entropy changes, and its z-score is how many standard deviations
   that change sits from the mean of the commits before it.  A commit with at
-  least min-history commits before it and a z-score over z-limit either way
-  is unusual.
+  least min-history commits before it and a z-score over the limit either way
+  is unusual; z-limit is the paper's limit.
 
   Over files rather than time: a file's surprisal is the mean bits per word of
   its words under the word distribution of the other files, smoothed by adding
   one to every count in the project's vocabulary.  Files with fewer than
-  min-words words get none.  A file whose surprisal is more than z-limit
+  min-words words get none.  A file whose surprisal is more than the limit's
   standard deviations above the mean of the files' is unusual."
   (:require [writ.spec :refer [spec ann law refine graph assume]]
             [clojure.math :as math]
@@ -52,12 +52,12 @@
 
 (ann surprisals [(Vec (Map String Nat)) -> Surprisals])
 (ann spread-z-scores [(Vec (Opt Double)) -> (Vec (Opt Double))])
-(ann unusual-files [(Vec Scored) -> (Vec UnusualFile)])
+(ann unusual-files [(Vec Scored) Double -> (Vec UnusualFile)])
 (ann entropy [(List String) -> Double])
 (ann source-entropy [String -> Double])
 (ann z-scores [(Vec Double) -> (Vec (Opt Double))])
-(ann unusual? [(Opt Double) -> Bool])
-(ann unusual-changes [(Vec Commit) -> (Vec Unusual)])
+(ann unusual? [(Opt Double) Double -> Bool])
+(ann unusual-changes [(Vec Commit) Double -> (Vec Unusual)])
 
 (graph unusual-changes
   {:states {:source String, :words (List String), :entropy Double,
@@ -66,7 +66,7 @@
    :edges  {:source  {[words] #{:words}, [source-entropy] #{:entropy}}
             :words   {[entropy] #{:entropy}}
             :deltas  {[z-scores] #{:scores}}
-            :commits {[unusual-changes] #{:unusual}}}})
+            :commits {[unusual-changes Double] #{:unusual}}}})
 
 (graph unusual-files
   {:states {:source String, :counts (Map String Nat), :all-counts (Vec (Map String Nat)),
@@ -75,9 +75,13 @@
    :edges  {:source     {[word-counts] #{:counts}}
             :all-counts {[surprisals] #{:surprisals}}
             :surprisals {[spread-z-scores] #{:spread}}
-            :files      {[unusual-files] #{:unusual}}}})
+            :files      {[unusual-files Double] #{:unusual}}}})
 
 ;; --- the spec's model ------------------------------------------------------
+
+(def ^:private limit
+  "The paper's limit, as the laws pass it."
+  (double e/z-limit))
 
 (defn- log2 [x] (/ (math/log (double x)) (math/log 2.0)))
 
@@ -174,26 +178,29 @@
 ;; --- unusual ---------------------------------------------------------------
 
 (law over-the-limit-either-way-is-unusual
-  (and (e/unusual? 3.5) (e/unusual? -3.5)
-       (not (e/unusual? 3.0)) (not (e/unusual? -1.0)) (not (e/unusual? nil))))
+  (and (e/unusual? 3.5 limit) (e/unusual? -3.5 limit)
+       (not (e/unusual? 3.0 limit)) (not (e/unusual? -1.0 limit)) (not (e/unusual? nil limit))))
 
 (law a-spike-is-an-unusual-change
-  (= (e/unusual-changes (mapv commit (conj steady 6.0)))
+  (= (e/unusual-changes (mapv commit (conj steady 6.0)) limit)
      [(assoc (commit 6.0) :z 4.0)]))
 
+(law a-higher-limit-lets-the-spike-pass
+  (= (e/unusual-changes (mapv commit (conj steady 6.0)) 5.0) []))
+
 (law ordinary-history-has-no-unusual-changes
-  (= (e/unusual-changes (mapv commit steady)) []))
+  (= (e/unusual-changes (mapv commit steady) limit) []))
 
 (law the-most-unusual-come-first
-  (= (map :z (e/unusual-changes (mapv commit (conj steady -2.0 100.0))))
-     (sort-by #(- (abs %)) (keep #(when (e/unusual? %) %)
+  (= (map :z (e/unusual-changes (mapv commit (conj steady -2.0 100.0)) limit))
+     (sort-by #(- (abs %)) (keep #(when (e/unusual? % limit) %)
                                 (e/z-scores (conj steady -2.0 100.0))))))
 
 (law unusual-changes-are-the-unusual-scores
   (forall [xs (Vec Int)]
     (let [cs (mapv commit xs)]
-      (= (count (e/unusual-changes cs))
-         (count (filter e/unusual? (e/z-scores (mapv :delta cs))))))))
+      (= (count (e/unusual-changes cs limit))
+         (count (filter #(e/unusual? % limit) (e/z-scores (mapv :delta cs))))))))
 
 ;; --- over files ------------------------------------------------------------
 
@@ -264,14 +271,14 @@
 
 (law an-unusually-surprising-file-is-unusual
   (let [files (conj (mapv scored (range) typical) (scored 20 20.0) (scored 21 nil))
-        [u & more] (e/unusual-files files)]
+        [u & more] (e/unusual-files files limit)]
     (and (nil? more) (= "f20.clj" (:path u)) (> (:z u) e/z-limit))))
 
 (law an-unusually-ordinary-file-is-not-unusual
-  (= [] (e/unusual-files (conj (mapv scored (range) typical) (scored 20 0.0)))))
+  (= [] (e/unusual-files (conj (mapv scored (range) typical) (scored 20 0.0)) limit)))
 
 (law unusual-files-come-most-surprising-first
   (forall [xs (Vec Int)]
-    (let [us (e/unusual-files (mapv scored (range) (map double xs)))]
+    (let [us (e/unusual-files (mapv scored (range) (map double xs)) limit)]
       (and (= (map :z us) (sort-by - (map :z us)))
            (every? #(> (:z %) e/z-limit) us)))))

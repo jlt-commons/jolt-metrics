@@ -112,7 +112,8 @@ Prints the report, or writes it to out.
               :ignored (when gitignore (git/ignored dir))
               :test-paths (:test-paths project-config)
               :api-namespaces (:api-namespaces project-config)
-              :api-paths (:api-paths project-config)}]
+              :api-paths (:api-paths project-config)
+              :thresholds (:thresholds project-config)}]
     (core/analyze-dir dir (assoc opts
                                  :changes (when git (git/changes dir days))
                                  :history (when git

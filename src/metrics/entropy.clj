@@ -29,7 +29,8 @@
 
 (def z-limit
   "How many standard deviations from the mean a change has to be, either way,
-  to be unusual; the paper's cut-off."
+  to be unusual; the paper's cut-off, and the default of the functions that take
+  a limit."
   3)
 
 (def min-words
@@ -107,11 +108,11 @@
           xs)))
 
 (defn unusual-files
-  "The files whose :surprisal is more than z-limit deviations above the
-  files', most surprising first, each with its :z."
-  [files]
+  "The files whose :surprisal is more than limit deviations above the files',
+  most surprising first, each with its :z."
+  [files limit]
   (->> (map (fn [f z] (assoc f :z z)) files (spread-z-scores (mapv :surprisal files)))
-       (filter #(and (:z %) (> (:z %) z-limit)))
+       (filter #(and (:z %) (> (:z %) limit)))
        (sort-by #(- (:z %)))
        vec))
 
@@ -140,15 +141,15 @@
            deltas)))
 
 (defn unusual?
-  "Is a z-score past the limit, either way?"
-  [z]
-  (boolean (and z (> (abs z) z-limit))))
+  "Is a z-score past limit, either way?"
+  [z limit]
+  (boolean (and z (> (abs z) limit))))
 
 (defn unusual-changes
-  "The commits whose :delta is unusual against those before them, oldest first
-  in, most unusual first out, each with its :z."
-  [commits]
+  "The commits whose :delta is more than limit deviations from those before
+  them, either way, oldest first in, most unusual first out, each with its :z."
+  [commits limit]
   (->> (map (fn [c z] (assoc c :z z)) commits (z-scores (mapv :delta commits)))
-       (filter #(unusual? (:z %)))
+       (filter #(unusual? (:z %) limit))
        (sort-by #(- (abs (:z %))))
        vec))
