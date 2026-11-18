@@ -541,13 +541,13 @@
 
 (defn- unit-graph
   "The e-graph of every unit's body, each form counted and noted as in its unit."
-  [units min-size]
+  [units]
   (reduce-kv
    (fn [g i u]
      (let [locals (into (tokens/locals (:body u)) (mapcat tokens/bound-symbols (:param-vectors u)))]
        (reduce (fn [g form] (first (eg/add-term g (encode locals form) i)))
                g (:body u))))
-   (assoc eg/empty-graph :unit-min min-size)
+   eg/empty-graph
    (vec units)))
 
 (defn opportunities
@@ -557,7 +557,7 @@
   [units opts]
   (let [opts (merge defaults opts)
         units (vec units)
-        g (saturate (unit-graph units (:min-size opts)) opts)
+        g (saturate (unit-graph units) opts)
         ctx (context g opts)
         ids (filter #(and (pos? (eg/occurrences g %))
                           (>= (class-size ctx %) (:min-size opts)))

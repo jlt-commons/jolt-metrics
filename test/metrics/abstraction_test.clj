@@ -122,3 +122,14 @@
         ctx (context g {:depth 3})
         _ (au ctx a b)]
     (is (= (map #(ab/render g %) fresh) (map #(ab/render g %) (au ctx x y))))))
+
+(deftest every-use-is-a-site
+  ;; c's if-not is smaller as written than the pattern it matches through its
+  ;; expansion, so it must not be too small to note where it occurs
+  (let [units [(unit "a" '[x] '(if (not (p x 2)) (a 1 2) (b 2 3)))
+               (unit "b" '[y] '(if (not (p y 2)) (a 1 2) (b 2 3)))
+               (unit "c" '[z] '(if-not (p z 2) (a 1 2) (b 2 3)))]
+        found (ab/opportunities units {:min-size 15})]
+    (is (seq found))
+    (doseq [o found]
+      (is (= (:uses o) (count (:sites o))) (pr-str o)))))

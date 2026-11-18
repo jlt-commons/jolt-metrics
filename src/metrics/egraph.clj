@@ -30,8 +30,9 @@
 
 (def empty-graph
   "An e-graph with nothing in it.  Classes record the definitions they occur in
-  only when their term has at least :unit-min nodes, so leaves stay cheap."
-  {:parent {} :memo {} :classes {} :pending [] :next 0 :unit-min 4})
+  only for compound terms, so leaves stay cheap.  Not by size: a rewrite can make
+  a small term equal to a larger one, and every occurrence of the class counts."
+  {:parent {} :memo {} :classes {} :pending [] :next 0})
 
 (defn find
   "The canonical id of id's class."
@@ -118,7 +119,7 @@
                                 (rest term))
           node (into [(first term)] kids)
           [g id] (add-node g node)]
-      [(if counted? (count-occurrence g id node (when (>= size (:unit-min g)) unit)) g)
+      [(if counted? (count-occurrence g id node (when (> size 1) unit)) g)
        id size])))
 
 (defn add-term
