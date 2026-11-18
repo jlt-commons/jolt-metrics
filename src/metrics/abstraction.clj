@@ -311,7 +311,8 @@
     :set (set kids)
     (:sym :local) (symbol x)
     :str x
-    :re (symbol (str "#\"" x "\""))
+    ;; edn has no regex literal: the call that makes one reads back
+    :re (list 're-pattern x)
     :lit (edn/read-string x)))
 
 (defn- term-form [t]

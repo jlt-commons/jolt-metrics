@@ -1,7 +1,8 @@
 (ns metrics.abstraction-test
   "Behaviour tests for abstraction search: encoding forms as terms, saturating
   with the sugar rules, anti-unifying e-classes and scoring what is found."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.edn]
+            [clojure.test :refer [deftest is testing]]
             [metrics.abstraction :as ab]
             [metrics.egraph :as eg]))
 
@@ -162,3 +163,12 @@
     (is (some? o))
     (is (= 2 (:uses o)))
     (is (= #{"d" "e"} (set (map :name (:sites o)))))))
+
+(deftest a-regex-in-a-pattern-reads-back-as-edn
+  ;; edn has no regex literal, and the EDN report prints patterns as they are
+  (let [units (for [[n x] [["a" 'x] ["b" 'y] ["c" 'z]]]
+                (unit n [x] (list 'some (list 'partial 're-find #"^/(\d+)") (list 'paths x :all))))
+        top (first (ab/opportunities units {:min-size 6}))]
+    (is (some? top))
+    (is (= (:pattern top) (clojure.edn/read-string (pr-str (:pattern top)))))
+    (is (some #{'(re-pattern "^/(\\d+)")} (tree-seq coll? seq (:pattern top))))))
