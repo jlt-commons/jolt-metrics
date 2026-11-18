@@ -1,47 +1,44 @@
 # jolt-metrics
 
-A code metrics library for Clojure/Jolt and Scheme source, written in Jolt. It computes
-cyclomatic complexity, cognitive complexity, Halstead metrics, the
-maintainability index, and architecture coupling, and picks out unusual commits
-from git history, files whose vocabulary doesn't fit the rest of the project, and
-definitions that are near-copies of each other. Its report leads with a ranked
-refactoring queue, so an agent or a human can see what to clean up first and why.
+A code metrics library for Clojure/Jolt and Scheme, written in Jolt. It computes
+cyclomatic and cognitive complexity, Halstead metrics, the maintainability index
+and coupling, and finds unusual commits, files whose vocabulary doesn't fit the
+project, and near-copies of definitions. The report opens with a ranked
+refactoring queue: what to clean up first, and why.
 
-Every metric's computation is checked against a
-[writ](https://github.com/jlt-commons/writ) spec, so the numbers are held to a
-stated contract, not just unit tests.
+Each metric is checked against a [writ](https://github.com/jlt-commons/writ)
+spec that states its contract, as well as by unit tests.
 
 ## Metrics
 
 | Metric | Source | What it measures |
 |---|---|---|
-| **LOC / SLOC / CLOC** | `metrics.loc` | total, source, and comment lines |
-| **Cyclomatic complexity** | `metrics.cyclomatic` | independent paths |
-| **Cognitive complexity** | `metrics.cognitive` | how hard the control flow is to read |
-| **Halstead metrics** | `metrics.halstead` | vocabulary, length, volume, difficulty, effort, time, bugs |
-| **Maintainability index** | `metrics.maintainability` | composite: Halstead volume + cyclomatic + LOC |
-| **Nesting depth** | `metrics.cognitive` | how deeply control structures nest |
-| **Coupling / instability** | `metrics.coupling` | afferent/efferent coupling and instability |
-| **Fan-in / fan-out / reach** | `metrics.calls` | per function: how many functions refer to it, how many it refers to, and how many depend on it at any distance (Clojure only) |
-| **Hotspot risk** | `metrics.hotspot` | how complex a file is and how often it changes |
-| **Unusual changes** | `metrics.entropy` | commits that changed the code's information content far more than usual |
-| **Entropy / surprisal** | `metrics.entropy` | a file's word entropy, and how unexpected its words are given the rest of the project |
-| **Compressed size / redundancy** | `metrics.compression` | an upper bound on a definition's or file's Kolmogorov complexity, and how much of a file is repetition |
-| **Near-duplicates** | `metrics.compression` | pairs of definitions whose normalized compression distance says one is nearly a copy of the other |
-| **Abstraction opportunities** | `metrics.abstraction` | code shapes that recur often enough for one function to replace them, with their parameters and what extracting them saves |
+| LOC / SLOC / CLOC | `metrics.loc` | total, source, and comment lines |
+| Cyclomatic complexity | `metrics.cyclomatic` | independent paths |
+| Cognitive complexity | `metrics.cognitive` | how hard the control flow is to read |
+| Halstead metrics | `metrics.halstead` | vocabulary, length, volume, difficulty, effort, time, bugs |
+| Maintainability index | `metrics.maintainability` | composite: Halstead volume + cyclomatic + LOC |
+| Nesting depth | `metrics.cognitive` | how deeply control structures nest |
+| Coupling / instability | `metrics.coupling` | afferent/efferent coupling and instability |
+| Fan-in / fan-out / reach | `metrics.calls` | per function: how many functions refer to it, how many it refers to, and how many depend on it at any distance (Clojure only) |
+| Hotspot risk | `metrics.hotspot` | how complex a file is and how often it changes |
+| Unusual changes | `metrics.entropy` | commits that changed the code's information content far more than usual |
+| Entropy / surprisal | `metrics.entropy` | a file's word entropy, and how unexpected its words are given the rest of the project |
+| Compressed size / redundancy | `metrics.compression` | an upper bound on a definition's or file's Kolmogorov complexity, and how much of a file is repetition |
+| Near-duplicates | `metrics.compression` | pairs of definitions whose normalized compression distance says one is nearly a copy of the other |
+| Abstraction opportunities | `metrics.abstraction` | code shapes that recur often enough for one function to replace them, with their parameters and what extracting them saves |
 
 ## Usage
 
-There are two ways to run it, with the same arguments and options: the
-standalone `jolt-metrics` binary, which needs no jolt install, or
-`jolt -m metrics.cli` with jolt. Churn, hotspots and unusual changes need `git`
-on the PATH either way.
+Run the standalone `jolt-metrics` binary, which needs no jolt install, or
+`jolt -m metrics.cli`. Both take the same arguments. Churn, hotspots and unusual
+changes need `git` on the PATH.
 
 ### The standalone binary
 
-Each [release](https://github.com/jlt-commons/jolt-metrics/releases) has a
-binary for macOS (arm64), Linux (x86_64) and Windows (x86_64). Unpack the
-archive and put `jolt-metrics` on your PATH:
+Each [release](https://github.com/jlt-commons/jolt-metrics/releases) has
+binaries for macOS (arm64), Linux (x86_64) and Windows (x86_64). Unpack one and
+put `jolt-metrics` on your PATH:
 
 ```console
 tar xzf jolt-metrics-v0.6.0-aarch64-macos.tar.gz
@@ -58,11 +55,11 @@ jolt-metrics src --format edn   # the full result, as data
 jolt-metrics --help
 ```
 
-To build the binary yourself from a checkout: `jolt build -m metrics.cli -o jolt-metrics`.
+To build it from a checkout: `jolt build -m metrics.cli -o jolt-metrics`.
 
 ### With jolt
 
-From a checkout of this repository, `jolt -m metrics.cli` takes the place of
+In a checkout of this repository, use `jolt -m metrics.cli` in place of
 `jolt-metrics`:
 
 ```console
@@ -71,14 +68,14 @@ jolt -m metrics.cli src report.html    # write the HTML page
 jolt -m metrics.cli --help
 ```
 
-From any other directory, pull it in as a git dependency for one run:
+Anywhere else, pull it in as a git dependency for one run:
 
 ```console
 jolt -Sdeps '{:deps {io.github.jlt-commons/jolt-metrics {:git/url "https://github.com/jlt-commons/jolt-metrics" :git/tag "v0.6.0" :git/sha "0ea0230"}}}' \
   -m metrics.cli src
 ```
 
-or give a project an alias for it in its `deps.edn`:
+or add an alias to a project's `deps.edn`:
 
 ```clojure
 {:aliases
@@ -96,7 +93,7 @@ jolt -M:metrics src report.html
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--format md\|edn\|json\|html` | from `out`, else `md` | Markdown for reading, EDN with the full result, JSON for tools, HTML to share |
+| `--format md\|edn\|json\|html` | from the output file, else `md` | Markdown for reading, EDN with the full result, JSON for tools, HTML to share |
 | `--top N` | 25 | queue entries to show in Markdown and HTML |
 | `--days N` | 90 | how much git history counts as recent churn |
 | `--commits N` | 500 | how many recent commits to check for unusual changes |
@@ -106,19 +103,17 @@ jolt -M:metrics src report.html
 | `--exclude GLOB` | | leave out matching files, relative to the directory; can be repeated |
 | `--config FILE` | `<dir>/.jolt-metrics.edn` | the config file |
 
-Without `--format`, the output file's extension picks the format: `.md`, `.edn`,
-`.json`, `.html` or `.htm`, in any case. Any other extension, or no output file,
-means Markdown, and `--format` always wins. Up to v0.1.2, `report.edn` without
-`--format` got Markdown; it now gets EDN.
+Without `--format`, an output file ending in `.md`, `.edn`, `.json`, `.html` or
+`.htm` (any case) gets that format. Anything else, or no output file, gets
+Markdown.
 
-The command exits 2 on bad usage or a missing directory. A file that can't be read
-doesn't fail the run; the report lists it under `Files not analyzed`. Reading never
-evaluates the source: `#=` is a read error.
+The command exits 2 on bad usage or a missing directory. An unreadable file
+doesn't fail the run; the report lists it under `Files not analyzed`. Source is
+never evaluated: `#=` is a read error.
 
 ### Configuration
 
-A project can say what to leave out, and what limits to judge by, once, in
-`.jolt-metrics.edn` in the analyzed directory:
+Put project settings in `.jolt-metrics.edn` in the analyzed directory:
 
 ```clojure
 {:exclude ["vendor/**" "target/**" "src/parser_generated.clj"]
@@ -129,34 +124,33 @@ A project can say what to leave out, and what limits to judge by, once, in
               :duplicates {:max-distance 0.3}}}
 ```
 
-Patterns are relative to that directory, and `--exclude` adds to the list. `*` stays
-within a directory, `**` crosses them, and a bare directory covers its contents.
-Inside a git repository, what git ignores is left out by default: build output
-like `target/` and anything else your `.gitignore` files, `.git/info/exclude` or
-global excludes name. A tracked file always counts, whatever the patterns say, and
-`--no-gitignore` turns this off. It works with `--no-git` too, which only skips the
-history. Outside a repository, or when git isn't installed, every file is read.
-Nothing else is excluded by default, so vendored and generated code that git tracks
-counts until you say otherwise. Files under `:test-paths` (by default `test` and `tests`, as a directory
-at any depth, or a glob) are test code: they're measured, but not queued or called
-unused.
+`:exclude` patterns are relative to that directory, and `--exclude` adds to
+them. `*` stays within a directory, `**` crosses directories, and a bare
+directory covers its contents.
 
-`:api-namespaces` names the namespaces that are public API, called from code outside
-the analyzed files, so their public functions are never listed as unreferenced. An
-entry is a namespace name, or a glob where `*` stands for any run of characters,
-dots included: `"my.lib.*"` covers `my.lib.core` and `my.lib.core.impl` but not
-`my.lib` itself. `:api-paths` does the same for files by path, with globs like
-`:exclude`'s, which covers files that have no `ns` form to match. Private functions
-in either are still checked.
+Inside a git repository, files git ignores are left out, whether through
+`.gitignore`, `.git/info/exclude` or global excludes. Tracked files always
+count. `--no-gitignore` turns this off; `--no-git` doesn't, since it only skips
+history. Outside a repository, or without git, every file is read. Nothing else
+is excluded by default, so tracked vendored and generated code counts until you
+exclude it.
+
+Files under `:test-paths` (default `test` and `tests`, as a directory at any
+depth, or a glob) are measured but never queued or called unused.
+
+`:api-namespaces` lists namespaces called from outside the analyzed code, so
+their public functions are never reported as unreferenced. An entry is a
+namespace name or a glob where `*` matches any characters, dots included:
+`"my.lib.*"` covers `my.lib.core` and `my.lib.core.impl` but not `my.lib`.
+`:api-paths` does the same by file path, with `:exclude`-style globs, for files
+with no `ns` form. Private functions in either are still checked.
 
 #### Thresholds
 
-`:thresholds` changes the limits the report judges by. Name only what you want to
-change: anything left out keeps its default, key by key, so
-`{:cyclomatic {:warning 8}}` keeps the critical limit of 20. Every format reports
-by the limits it used: the Markdown and HTML Thresholds tables and section notes
-show them, EDN has the whole map under `:thresholds`, and JSON has it under
-`thresholds` with snake_case keys.
+`:thresholds` overrides the report's limits key by key, so
+`{:cyclomatic {:warning 8}}` keeps the critical limit of 20. Every format shows
+the limits it used: the Markdown and HTML Thresholds tables, `:thresholds` in
+EDN, and `thresholds` (snake_case) in JSON.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -173,45 +167,42 @@ show them, EDN has the whole map under `:thresholds`, and JSON has it under
 | `:duplicates` | `{:max-distance 0.35 :min-tokens 40}` | the largest compression distance a near-duplicate pair can have, and the fewest tokens a definition needs to be compared |
 | `:abstractions` | `{:min-size 8 :max-arity 4}` | the fewest syntax nodes an abstraction opportunity can have, and the most parameters it can take |
 
-The count limits are whole numbers, the hotspot limits and `:max-distance` lie
-between 0 and 1, and `:z` is positive. A `:warning` past its `:critical` (the other
-way round for `:maintainability`) is an error, as is an unknown key, so a typo
+Count limits are whole numbers, hotspot limits and `:max-distance` lie between 0
+and 1, and `:z` is positive. A `:warning` past its `:critical` (the other way
+round for `:maintainability`) is an error, and so is an unknown key, so a typo
 can't silently keep a default. A bad config stops the run with exit code 2 and
 says what's wrong.
 
-Raising `:unusual :z` or lowering `:duplicates :max-distance` lists fewer, surer
-findings. The defaults come from the sources in the table below and the sections
-on unusual changes and near-duplicates.
+Raising `:unusual :z` or lowering `:duplicates :max-distance` gives fewer,
+surer findings.
 
 ### The report
 
-1. **Summary**: finding counts and project totals.
-2. **Files not analyzed**: anything unreadable, with the reason.
-3. **Refactoring queue**: functions and files over a threshold, worst first. Each
-   entry has its location and line range, its numbers with the broken ones in bold,
-   and what to do about it. Tests aren't queued. A function's score is weighed by
-   its reach, how many functions depend on it at any distance, so a complex
-   function everything goes through ranks above an equally complex one nothing
-   calls. The weight rises on a log scale from 1 with no dependents to 2 at 100
-   and stays there; 100 is our choice.
-4. **Hotspots**: complex files that keep changing. Their contents rank higher in
-   the queue. See below.
-5. **Unusual changes**: commits that put far more information into the code, or
-   took far more out, than the ones before them. See below.
-6. **Unusual files**: files whose words are far more surprising than the
-   project's other files'. See below.
-7. **Near-duplicates**: pairs of definitions that are near-copies, closest first.
-   See below.
-8. **Abstraction opportunities**: code shapes that one function could replace,
-   with holes where the uses differ, most saving first. See below.
-9. **Cleanup candidates**: unused requires, and functions nothing mentions. A
-   require counts as used when anything it brings in is, so an idle alias beside a
-   used `:refer` isn't listed, while referred names nobody uses are. Matching
-   is by name and conservative, but runtime lookups and outside callers can't be
-   seen, so check public functions before removing them, and name your API
-   namespaces in the config to keep them off the list.
-10. **Files** and **Architecture**: the numbers per file, coupling, and dependencies.
-11. **Thresholds**: what the severities mean.
+1. Summary: finding counts and project totals.
+2. Files not analyzed: anything unreadable, with the reason.
+3. Refactoring queue: functions and files over a threshold, worst first, each
+   with its location, line range, numbers (broken ones in bold) and what to do.
+   Tests aren't queued. A function's score is weighted by its reach, so a
+   complex function everything goes through ranks above an equally complex one
+   nothing calls. The weight rises on a log scale from 1 with no dependents to
+   2 at 100 and stays there; 100 is our choice.
+4. [Hotspots](#hotspots): complex files that keep changing. Their contents rank
+   higher in the queue.
+5. [Unusual changes](#unusual-changes): commits that put far more information
+   into the code, or took far more out, than the ones before them.
+6. [Unusual files](#unusual-files): files whose words are far more surprising
+   than the project's other files'.
+7. [Near-duplicates](#compression-and-near-duplicates): pairs of definitions
+   that are near-copies, closest first.
+8. [Abstraction opportunities](#abstraction-opportunities): code shapes that one
+   function could replace, with holes where the uses differ, most saving first.
+9. Cleanup candidates: unused requires, and functions nothing mentions. A
+   require counts as used when anything it brings in is, so an idle alias next
+   to a used `:refer` isn't listed, but unused referred names are. Matching is
+   by name and can't see runtime lookups or outside callers, so check public
+   functions before removing them, and list your API namespaces in the config.
+10. Files and Architecture: per-file numbers, coupling and dependencies.
+11. Thresholds: what the severities mean.
 
 | Rule | Warning | Critical | Where the limits come from |
 |---|---|---|---|
@@ -225,112 +216,104 @@ on unusual changes and near-duplicates.
 | File dependencies | > 19 | > 39 | [Checkstyle](https://checkstyle.org/checks/metrics/classfanoutcomplexity.html) and PMD use 20 for classes; ast-metrics uses 20 and 40 |
 | Hotspot risk (at least 3 changes) | >= 0.5 | >= 0.8 | no published standard; these are our choice |
 
-These are the defaults; `:thresholds` in the config changes them (see
-[Thresholds](#thresholds)).
-
-Function length sits between the Clojure style guide and general-purpose tools.
-Taken literally, the guide's 10 lines flags a quarter of the functions in the
-Clojure projects we measured, while 20 flags about one in ten. These limits are
-rules of thumb rather than research results; even NIST calls the exact number
-"somewhat controversial".
+These are the defaults (see [Thresholds](#thresholds)). The function length
+limit sits between the Clojure style guide and general-purpose tools: in the
+Clojure projects we measured, the guide's 10 lines flags a quarter of all
+functions, and 20 flags about one in ten. All of these are rules of thumb; even
+NIST calls the exact number "somewhat controversial".
 
 ### Hotspots
 
-A file's risk combines how often it changed in the last `--days` (90 by default)
-and its cyclomatic complexity, each scaled to 0..1, as ast-metrics does: risk is
-1 minus the distance to the corner where both are highest. ast-metrics scales by
-the project's own maxima, so in any project the file with the most changes and the
-most complexity scores 1.0, a critical, however modest its numbers. In a young
-project that is the central file, and refactoring it can't clear it, since every
-refactor commit is another change
-([#14](https://github.com/jlt-commons/jolt-metrics/issues/14)).
+A file's risk combines how often it changed in the last `--days` (default 90)
+with its cyclomatic complexity, each scaled to 0..1. As in ast-metrics, risk is
+1 minus the distance to the corner where both are highest. ast-metrics scales
+by the project's own maxima, so the file with the most changes and complexity
+always scores 1.0, a critical, however modest its numbers. In a young project
+that's the central file, and refactoring can't clear it because every refactor
+is another change ([#14](https://github.com/jlt-commons/jolt-metrics/issues/14)).
 
-So each axis is scaled by the project's maximum or a floor, whichever is higher:
-20 changes in the window and a file cyclomatic complexity of 100. A file has to
-change about as often as a busy project's busiest files, and be about as complex
-as the most complex tenth of files in the mature Clojure projects we measured
-(clojure-lsp, babashka, newsroom), to reach the corner. A project whose top files
-pass the floors is scored as before. A day-old library's central file, at 5
-changes and complexity 113, has risk 0.25 rather than 1.0, and becomes a hotspot
-again only if it keeps changing. `:changes-floor` and `:complexity-floor` under
-`:hotspot` in the config change the floors; set both to 0 for the purely relative
-score. If you run with a much shorter `--days`, lower `:changes-floor` with it.
+So each axis is scaled by the project's maximum or a floor, whichever is
+higher: 20 changes in the window, and a file cyclomatic complexity of 100. To
+reach the corner, a file has to change as often as a busy project's busiest
+files and be as complex as the top tenth of files in the mature Clojure
+projects we measured (clojure-lsp, babashka, newsroom). Projects whose top
+files pass the floors score as before. A day-old library's central file, at 5
+changes and complexity 113, has risk 0.25 rather than 1.0.
+
+`:changes-floor` and `:complexity-floor` under `:hotspot` change the floors;
+set both to 0 for the purely relative score. With a much shorter `--days`,
+lower `:changes-floor` to match.
 
 ### Unusual changes
 
 This follows Torres, Baltes, Treude and Wagner, [Information-theoretic detection
 of unusual source code changes](https://doi.org/10.1007/s10664-025-10644-y)
-(Empirical Software Engineering, 2025). The source is read as a stream of words:
-identifiers are split where the case changes and at anything that isn't a letter,
-so `createUser` and `create-user` are both `create` and `user`. A file's entropy
-is the Shannon entropy of its word frequencies, in bits, comments included. A
-commit's change is the sum of its files' changes, and its z-score is how many
-standard deviations that sits from the mean change of every commit before it. A
-commit with at least 10 before it and a z-score over 3, either way, is listed,
-most unusual first. `:unusual :z` in the config changes the 3.
+(Empirical Software Engineering, 2025). Source is read as a stream of words,
+with identifiers split at case changes and non-letters, so `createUser` and
+`create-user` are both `create` and `user`. A file's entropy is the Shannon
+entropy of its word frequencies in bits, comments included. A commit's change
+is the sum of its files' entropy changes, and its z-score is how many standard
+deviations that is from the mean of every earlier commit. Commits with at least
+10 before them and a z-score over 3 in either direction are listed, most
+unusual first.
 
-Only files the report measures count, and tests don't, since the paper found test
-and generated code changes to be its false positives. Excluding generated code in
-the config keeps it out here too. History is read along the first-parent line, so
-a merged pull request is judged as one change, and commits that touch no analyzed
-code aren't part of the baseline.
+Only files the report measures count, minus tests, which the paper found to be
+a source of false positives along with generated code (exclude that in the
+config). History follows the first parent, so a merged pull request is one
+change, and commits that touch no analyzed code aren't in the baseline.
 
-On the paper's 95 Java projects, 58% of the commits this flags were feature work
-maintainers would want to look at, and 83% counting feature removals and porting;
-the rest were mostly removals of dead code, build changes and file conversions.
-Large swings are mostly features landing, rarely bugs: treat the list as where to
-look closer in review, not as defects. The paper got its best precision by keeping
-all history as the baseline rather than a recent window, which is why every commit
-in the `--commits` range counts.
+On the paper's 95 Java projects, 58% of flagged commits were feature work
+maintainers would want to look at, or 83% counting feature removals and
+porting; most of the rest were dead-code removal, build changes and file
+conversions. Large swings are mostly features landing and rarely bugs, so use
+the list to decide where to look closer in review. The paper got its best
+precision using all history as the baseline, so every commit in the
+`--commits` range counts.
 
-Reading history costs a few seconds for 500 commits on a typical project; it
-grows with the size of the files the commits touch.
+Reading 500 commits takes a few seconds on a typical project, more when the
+commits touch large files.
 
 ### Unusual files
 
-The same words give a distribution over the files as they are now. Each file has
-its `:entropy`, the Shannon entropy of its words, and the summary has their
-average, which the paper calls the entropy spread: when it keeps climbing, files
-are taking on more concepts rather than new files being made for them.
+The same words give each file an `:entropy`. Their average in the summary is
+what the paper calls the entropy spread: if it keeps climbing, files are taking
+on more concepts instead of new files being made for them.
 
 A file's `:surprisal` is the cross-entropy of its words against the rest of the
-project: the bits each of its words takes, on average, under the word
-distribution of every other file, with one added to each count so a word found
-nowhere else has a finite cost. Raw entropy mostly tracks how big a file is;
-surprisal doesn't, since it's per word. A file whose surprisal is more than 3
-standard deviations above the files' mean is listed (`:unusual :z` again). These are files that speak a
-different vocabulary from their project: on babashka, a generated table of XML
-entities and a standalone example; on clj-kondo, a vendored copy of tools.reader.
-Exclude such code in the config once you've seen it, or move a concern that
+project: the average bits per word under every other file's word distribution,
+with one added to each count so a word found nowhere else has a finite cost.
+Raw entropy mostly tracks file size; surprisal is per word, so it doesn't. A
+file more than 3 standard deviations above the mean is listed. These files use
+a different vocabulary from the rest of the project: on babashka, a generated
+table of XML entities and a standalone example; on clj-kondo, a vendored copy
+of tools.reader. Exclude such code once you've seen it, or move a concern that
 belongs elsewhere.
 
-Tests get no surprisal and don't count toward the distribution, and nor do files
-under 50 words, which say too little about their vocabulary. Name fixture
-directories like `test-resources` in `:test-paths` to keep them out. The paper
-proposed cross-entropy as the next measure to try but didn't evaluate it, so
-there's no published precision for this list.
+Tests and files under 50 words get no surprisal and don't count toward the
+distribution. Add fixture directories like `test-resources` to `:test-paths`.
+The paper proposed cross-entropy but didn't evaluate it, so there's no
+published precision for this list.
 
 ### Compression and near-duplicates
 
-The Kolmogorov complexity of a piece of code is the length of the shortest program
-that prints it. No program can compute it, but any compressor gives an upper bound,
-and the information-theory literature uses one in its place. Here it is DEFLATE,
-gzip's algorithm, at its best level and without a header.
+The Kolmogorov complexity of code is the length of the shortest program that
+prints it. It can't be computed, but any compressor gives an upper bound, and
+the literature uses one in its place. Here that's DEFLATE (gzip's algorithm) at
+its best level, without a header.
 
-What gets compressed matters more than which compressor does it: Jbara and
-Feitelson, [Quantification of code regularity using preprocessing and
-compression](https://www.cs.huji.ac.il/~feit/papers/RegMet14.pdf) (2014), compared
-five compressors and four preprocessing levels and found that the preprocessing
-decides the result. So the code is compressed as a token stream, not as text:
-layout, comments and docstrings are gone, every local is renamed by where it first
-appears (`$0`, `$1`, ...), and every string or regex is a placeholder.
-`(defn mean [xs] ...)` and `(defn avg [vs] ...)` with the same body give the same
-tokens.
+Jbara and Feitelson, [Quantification of code regularity using preprocessing and
+compression](https://www.cs.huji.ac.il/~feit/papers/RegMet14.pdf) (2014),
+compared five compressors and four preprocessing levels and found the
+preprocessing decides the result. So code is compressed as a token stream:
+layout, comments and docstrings are dropped, locals are renamed by first
+appearance (`$0`, `$1`, ...), and strings and regexes become placeholders.
+`(defn mean [xs] ...)` and `(defn avg [vs] ...)` with the same body give the
+same tokens.
 
-Each definition has its `:compressed-size` in bytes. Each file has its own, for all
-of its code together, and its `:redundancy`: the share of its token stream that
-compression removes, from 0 up to 1. A file of repeated shapes, boilerplate or
-copies, rates high. The summary has the average over the files that aren't tests.
+Each definition has a `:compressed-size` in bytes. Each file has one for all its
+code, plus a `:redundancy`: the share of its token stream compression removes,
+from 0 to 1. Files of boilerplate or copies rate high. The summary averages it
+over non-test files.
 
 Two definitions are near-duplicates when their normalized compression distance
 (Li, Chen, Li, Ma and Vitányi, [The similarity
@@ -340,34 +323,31 @@ metric](https://arxiv.org/abs/cs/0111054), 2004),
 NCD(x, y) = (C(xy) - min(C(x), C(y))) / max(C(x), C(y))
 ```
 
-is at most 0.35. NCD is 0 when compressing one says everything about the other
+is at most 0.35. NCD is 0 when one compressed says everything about the other,
 and near 1 when it says nothing. Ishio, Maeda, Shibuya and Inoue, [Cloned buggy
 code detection in practice using normalized compression
-distance](https://naist-se.github.io/pastpublications/naistse-1259.pdf),
-use the same measure over token streams with DEFLATE to find cloned code, and
-NEC deployed it. The 0.35 is our choice, from reading the pairs found in
-clojure-lsp: at that distance two definitions share most of their code and differ
-in a call, a keyword or a few arguments. Definitions under 40 tokens are left out,
-because compression overhead dominates there and short repeats are idioms rather
-than copies. Tests, and pairs where one definition is a helper inside the other,
-are left out too. `:duplicates` in the config changes the 0.35 (`:max-distance`)
-and the 40 (`:min-tokens`).
+distance](https://naist-se.github.io/pastpublications/naistse-1259.pdf), use
+the same measure over DEFLATE-compressed token streams to find clones, and NEC
+deployed it. We picked 0.35 by reading the pairs found in clojure-lsp: at that
+distance two definitions share most of their code and differ in a call, a
+keyword or a few arguments. Definitions under 40 tokens are skipped, because
+compression overhead dominates and short repeats are idioms. Tests are skipped
+too, as are pairs where one definition is a helper inside the other.
 
-Comparing every pair of definitions is quadratic, so two cheap tests rule out most
-pairs before anything is compressed. The first is size: NCD is at least the gap
-between two sizes over the larger, so definitions that compress to very different
-sizes can't be near-duplicates. The second is a MinHash estimate of the token
-trigrams two definitions share; pairs estimated under 12% shared are skipped.
-That second test is an estimate, so a pair that only just qualifies can be missed,
-though definitions with the same tokens never are. On clojure-lsp's 1334
-functions it found the same 54 pairs as comparing every pair, in about a second
-of CPU time; the rest of the analysis takes about six.
+Comparing every pair is quadratic, so two cheap tests rule out most pairs
+before compressing anything. NCD is at least the size gap over the larger size,
+so definitions that compress to very different sizes can't match. Then a
+MinHash estimate of shared token trigrams skips pairs under 12%. Being an
+estimate, it can miss a pair that only just qualifies, but never identical
+token streams. On clojure-lsp's 1334 functions it found the same 54 pairs as
+the full comparison, in about a second of CPU time; the rest of the analysis
+takes about six.
 
 ### Abstraction opportunities
 
-Near-duplicates say two definitions are alike. Abstraction opportunities say what
-code recurs, anywhere in the project and at any size above a floor, with
-variables where its uses differ:
+Where near-duplicates pair whole definitions, this finds code that recurs
+anywhere in the project above a minimum size, with variables where the uses
+differ:
 
 ```
 (z/find-token ?a (fn [?b] (= ?c (z/string ?b))))    ; 9 uses, 2 parameters
@@ -380,51 +360,49 @@ anti-unification](https://arxiv.org/abs/2212.04596), POPL 2023):
 1. Every definition goes into one e-graph (`metrics.egraph`, built as in Willsey
    et al., [egg: Fast and extensible equality
    saturation](https://arxiv.org/abs/2004.03082), POPL 2021), which shares
-   equal subterms. Rewrites that only undo sugar are applied until nothing
-   changes: `->`, `->>`, `when`, `when-not`, `if-not` and an explicit `nil`
-   else. A form written with `->` and the same code written as nested calls then
-   sit in one e-class.
+   equal subterms. Rewrites that undo sugar run to a fixpoint: `->`, `->>`,
+   `when`, `when-not`, `if-not` and an explicit `nil` else. Code written with
+   `->` and the same code as nested calls end up in one e-class.
 2. Pairs of e-classes are anti-unified: the most specific pattern both fit is
-   found, trying every pair of their nodes with the same operator, so it can be
-   found through either spelling. As in Plotkin's original, the same pair of
-   differing subterms is always the same variable. Locals always become
-   variables, since their names mean nothing outside their definition, and a
-   variable in a binding position is a local of the new function rather than a
-   parameter. A pattern that would need a variable for a whole binding vector
-   or parameter list is dropped: that's a macro's job.
+   found by trying every pair of their nodes with the same operator, so either
+   spelling works. As in Plotkin's original, the same pair of differing
+   subterms always gets the same variable. Locals always become variables,
+   since their names mean nothing outside their definition, and a variable in
+   a binding position is a local of the new function, not a parameter. Patterns
+   that need a variable for a whole binding vector or parameter list are
+   dropped; that's a macro's job.
 3. Each pattern is matched over the e-graph to count its uses and scored as
    Stitch does (Bowers et al., [Top-down synthesis for library
-   learning](https://arxiv.org/abs/2211.16605), POPL 2023): every use saves the
-   pattern's size less a call of two nodes, and the new definition costs the
-   pattern, a node per parameter and three more. Patterns are taken greedily,
-   most saving first, and the code each one takes up is spent, so its
-   generalizations and its pieces don't come back as separate entries.
+   learning](https://arxiv.org/abs/2211.16605), POPL 2023): each use saves the
+   pattern's size minus a two-node call, and the new definition costs the
+   pattern plus a node per parameter plus three. Patterns are taken greedily,
+   most saving first, and the code each one covers is used up, so its
+   generalizations and pieces don't reappear as separate entries.
 
 Comparing every pair of e-classes is quadratic, so only classes with the same
-operator and head are compared, each with its next 8 neighbours in a sort by
-shape: the sorted-neighbourhood method of record linkage (Hernández and Stolfo,
-[The merge/purge problem for large
+operator and head are compared, each against its next 8 neighbours in a sort by
+shape. This is the sorted-neighbourhood method from record linkage (Hernández
+and Stolfo, [The merge/purge problem for large
 databases](https://dl.acm.org/doi/10.1145/223784.223807), 1995). Copies sort
-together, so a pattern with several uses very likely has some pair of them
-compared. Strings keep their text here, unlike in compression, because an
-extracted function would have to take a differing string as a parameter.
+together, so a pattern with several uses very likely has some pair compared.
+Strings keep their text here, unlike in compression, because an extracted
+function would need a differing string as a parameter.
 
-Saves counts syntax nodes and is a lower bound: a node only a rewrite made counts
-for nothing, so the pattern is shown as written. Patterns need at least 8 nodes
-and at most 4 parameters; `:abstractions` in the config changes both. Tests are
-left out. The result keeps the best 50.
+Savings count syntax nodes and are a lower bound: nodes only a rewrite created
+count for nothing, so patterns are shown as written. Tests are skipped, and the
+best 50 are kept.
 
 On clojure-lsp's 1435 definitions the search takes about 5 seconds, most of the
-report's time, so `--no-abstractions` skips it. Its top finding is the
+report's time; `--no-abstractions` skips it. Its top finding there is the
 code-action map `{:command {:arguments ?a :command ?b :title ?c} :kind ?d :title
 ?c}`, built by hand 33 times.
 
 ### JSON
 
-`--format json` is the lean report: what to act on, in a shape tools can rely on.
-It leaves out what EDN has for Clojure users (per-function numbers for functions
-that break nothing, Halstead detail, imports). On this repository it's about 10 KB
-where EDN is 130 KB.
+`--format json` is the lean report: what to act on, in a stable shape. It
+leaves out per-function numbers for functions that break nothing, Halstead
+detail and imports, which EDN keeps. On this repository it's about 10 KB to
+EDN's 130 KB.
 
 ```json
 {"tool": "jolt-metrics", "schema_version": 1,
@@ -451,22 +429,22 @@ where EDN is 130 KB.
 | `dependencies` | `from`, `to` |
 
 Keys are snake_case and always present, and so are values that were keywords
-(`"file_lines"`). Lists are empty, never missing. A function finding's `metrics` has
-`cyclomatic`, `cognitive`, `nesting`, `lines`, `params`, `maintainability`,
-`fan_in`, `fan_out` and `reach` (the last three `null` outside Clojure); a file
-finding's is `null`. Numbers that aren't whole are rounded to 3 decimals, and
-one JSON can't hold (NaN, infinity) is `null`.
+(`"file_lines"`). Lists are empty, never missing. A function finding's
+`metrics` has `cyclomatic`, `cognitive`, `nesting`, `lines`, `params`,
+`maintainability`, `fan_in`, `fan_out` and `reach` (the last three `null`
+outside Clojure); a file finding's is `null`. Non-integers are rounded to 3
+decimals, and values JSON can't hold (NaN, infinity) are `null`.
 
 ### HTML
 
-`--format html` writes one file that opens anywhere: the Markdown report's sections
-as tables, with the CSS and script inline and nothing fetched, so it can be emailed
-or dropped in a chat. Light and dark follow the system, and a theme button switches
-them. The script sorts the Files, Coupling, Hotspots and Unusual changes tables by any column,
-filters files by path and the queue by severity, collapses sections, and has a
-**Download JSON** button. The page embeds the same lean JSON, so whoever gets the
-file has the data too. Without the script every table is still there; only the
-controls are hidden.
+`--format html` writes a single self-contained file with the Markdown report's
+sections as tables. CSS and script are inline and nothing is fetched, so you
+can email it or drop it in a chat. It follows the system's light or dark theme,
+with a button to switch. The script sorts the Files, Coupling, Hotspots and
+Unusual changes tables by any column, filters files by path and the queue by
+severity, collapses sections, and offers a Download JSON button for the lean
+JSON embedded in the page. Without the script, the tables are all still there;
+only the controls are hidden.
 
 ### API
 
@@ -501,15 +479,15 @@ controls are hidden.
 ```
 
 A result has `:files`, `:errors`, `:edges`, `:summary`, `:queue`, `:hotspots`,
-`:unusual-changes`, `:unusual-files` and `:cleanup`. Each file carries `:loc`,
+`:unusual-changes`, `:unusual-files` and `:cleanup`. Each file has `:loc`,
 `:cyclomatic`, `:cognitive`, `:halstead`, `:entropy`, `:surprisal`, `:words`,
-`:maintainability-index-without-comments`, `:functions` (per-definition metrics),
-and the coupling fields `:efferent-coupling`, `:afferent-coupling`, `:instability`,
-`:instability-band`.
+`:maintainability-index-without-comments`, `:functions` (per-definition
+metrics), and the coupling fields `:efferent-coupling`, `:afferent-coupling`,
+`:instability` and `:instability-band`.
 
 ## Architecture
 
-The pipeline keeps the metric math pure and swappable over different parsers:
+The metric math is pure and independent of the parser:
 
 ```
 source ──► normalized model ──► pure metric visitors ──► queue ──► report
@@ -519,60 +497,61 @@ source ──► normalized model ──► pure metric visitors ──► queue
                                 entropy, compression
 ```
 
-- **`metrics.reader`** parses Clojure/Jolt forms into a normalized model: each
-  definition's decision kinds, cognitive flow tree, Halstead operators/operands,
-  logical LOC, and the file's imports. Every metric walks forms through one
-  function, so they all see the same code: collections are code, while quoted data,
-  `comment` forms and `case` constants aren't. Syntax-quote is read back, so a macro
-  is measured as written.
-- **`metrics.scanner`** lexes the raw text for what the reader discards: docstrings,
+- `metrics.reader` parses Clojure/Jolt forms into a normalized model: each
+  definition's decision kinds, cognitive flow tree, Halstead operators and
+  operands, logical LOC, and the file's imports. Every metric walks forms
+  through one function, so they all see the same code: collections are code;
+  quoted data, `comment` forms and `case` constants aren't. Syntax-quote is
+  read back, so macros are measured as written. `#?` reader conditionals are
+  read for the running platform, so other platforms' branches aren't measured.
+- `metrics.scanner` lexes the raw text for what the reader drops: docstrings,
   discards, and where each list ends.
-- **`metrics.*`** metric namespaces are pure functions over that model. They
-  never read files and never mention writ.
-- **`metrics.tokens`** turns forms into the token stream compression measures.
-  **`metrics.deflate`** (the compressor) and **`metrics.minhash`** (the pair
-  pre-filter, on arrays for speed) are the host code `metrics.compression` uses,
-  kept apart so that what writ checks stays pure.
-- **`metrics.core`** orchestrates: parse, compute per-definition and per-file
-  metrics, resolve coupling across files, and roll the project up.
-- **`metrics.callgraph`** builds [jolt-lsp](https://github.com/jlt-commons/jolt-lsp)'s
-  index from the Clojure files the analyzer collected, tests left out, and gives
-  each function its fan-in, fan-out and reach from the resolved references
-  between the project's vars. A reference counts whether it calls a function or
-  passes it on.
-- **`metrics.queue`** and **`metrics.cleanup`** turn the numbers into work.
-  **`metrics.thresholds`** holds the limits the queue and the findings go by: the
-  defaults, merged with a project's own and checked.
-- **`metrics.git`** reads churn and each commit's entropy change. It is the only
+- `metrics.*` metric namespaces are pure functions over the model. They never
+  read files or mention writ.
+- `metrics.tokens` turns forms into the token stream compression measures.
+  `metrics.deflate` (the compressor) and `metrics.minhash` (the pair
+  pre-filter, on arrays for speed) are host code used by `metrics.compression`,
+  kept separate so what writ checks stays pure.
+- `metrics.core` parses, computes per-definition and per-file metrics, resolves
+  coupling across files, and rolls up the project.
+- `metrics.callgraph` builds a [jolt-lsp](https://github.com/jlt-commons/jolt-lsp)
+  index from the non-test Clojure files and derives each function's fan-in,
+  fan-out and reach from resolved references between vars. Passing a function
+  counts as a reference, the same as calling it.
+- `metrics.queue` and `metrics.cleanup` turn the numbers into work.
+  `metrics.thresholds` holds the limits: the defaults merged with the project's
+  own, and validated.
+- `metrics.git` reads churn and each commit's entropy change. It's the only
   part that shells out.
-- **`metrics.report`** renders Markdown, **`metrics.json`** the lean JSON, and
-  **`metrics.html`** the HTML page, inlining `resources/metrics/html/report.css`
+- `metrics.report` renders Markdown, `metrics.json` the lean JSON, and
+  `metrics.html` the HTML page, inlining `resources/metrics/html/report.css`
   and `report.js`.
 
-A definition is a `defn`, `defn-`, `defmacro`, `defmethod`, `deftest`, a method of
-`defrecord`, `deftype`, `extend-type` or `extend-protocol`, or a `def`, `defonce` or
-`defmulti` of an `fn`. Other top-level code counts toward its file's complexity.
+A definition is a `defn`, `defn-`, `defmacro`, `defmethod`, `deftest`, a method
+of `defrecord`, `deftype`, `extend-type` or `extend-protocol`, or a `def`,
+`defonce` or `defmulti` of an `fn`. Other top-level code counts toward its
+file's complexity.
 
 ### Languages
 
-The pipeline only sees a language adapter (`metrics.language`), which says how to
-parse and scan a language. Parsing has to end in the forms the shared walker
-understands, so every language gets the same metrics from the same code. Adding a
-language means writing an adapter and listing it there.
+The pipeline only sees a language adapter (`metrics.language`) that says how to
+parse and scan a language. Parsing has to produce the forms the shared walker
+understands, so every language gets the same metrics from the same code. To add
+a language, write an adapter and register it there.
 
 ## Scheme
 
-`.ss`, `.scm`, `.sls` and `.sps` files are analyzed as Scheme, targeting Chez and
-Gambit; other dialects work as far as they share that syntax. A directory with both
-languages gets one report. All of it lives under `metrics.scheme`:
+`.ss`, `.scm`, `.sls` and `.sps` files are analyzed as Scheme, targeting Chez
+and Gambit; other dialects work as far as they share that syntax. A directory
+with both languages gets one report. The code lives under `metrics.scheme`:
 
-- **`metrics.scheme.scanner`** says what a Scheme token is: a comma is unquote, a
-  bracket is a paren, and `#` covers block and datum comments and Gambit's `#!void`.
-- **`metrics.scheme.reader`** parses those tokens into forms. It only parses, so
-  nothing in the source can run.
-- **`metrics.scheme.normalize`** rewrites Scheme into the walker's shapes, and is the
-  one place that decides what Scheme means.
-- **`metrics.scheme.deps`** finds what a file depends on.
+- `metrics.scheme.scanner` defines Scheme tokens: a comma is unquote, a bracket
+  is a paren, and `#` covers block and datum comments and Gambit's `#!void`.
+- `metrics.scheme.reader` parses tokens into forms. It only parses, so nothing
+  in the source can run.
+- `metrics.scheme.normalize` rewrites Scheme into the walker's shapes, and is
+  the one place that decides what Scheme means.
+- `metrics.scheme.deps` finds what a file depends on.
 
 | Scheme | Measured as |
 |---|---|
@@ -589,62 +568,54 @@ languages gets one report. All of it lives under `metrics.scheme`:
 | `begin`, `module`, `library`, `eval-when` at top level | opened, so what's inside counts |
 | quoted data | not code; in a quasiquote, only what's unquoted is |
 
-Every other list is a call. A name that would read as a Clojure form, like the `loop`
-in `(let loop ...)`, stays a call, and a form too malformed to translate, as can
-happen in a macro template, is read as one.
+Every other list is a call. A name that would read as a Clojure form, like the
+`loop` in `(let loop ...)`, stays a call, and so does a form too malformed to
+translate, as can happen in a macro template.
 
-Files depend on each other through `load`, `include` and `##include`, and through
-`import` of a `library`. A load's path can be relative to its file or the analyzed
-root, or the unique file ending that way. One built at runtime can't be known, and an
-ambiguous one makes no edge.
+Files depend on each other through `load`, `include`, `##include`, and `import`
+of a `library`. A load path can be relative to its file or the analyzed root,
+or match the unique file ending that way. Paths built at runtime can't be
+resolved, and ambiguous ones make no edge.
 
-Public functions aren't reported as unreferenced in Scheme, because a runtime's names
-are reached from emitted code and strings. There's no `private` to check, and no
-unused imports yet. Top-level code like `(let () (define ...))` counts toward its
-file but isn't queued.
+Public functions aren't reported as unreferenced in Scheme, because runtimes
+reach names from emitted code and strings. There's no `private` to check, and
+no unused-import check yet. Top-level code like `(let () (define ...))` counts
+toward its file but isn't queued.
 
-### The scores
+## Maintainability index
 
 The index is `171 - 5.2*ln(V) - 0.23*G - 16.2*ln(lines)`, scaled to 0..100 and
-clamped at 0. A definition uses its own source lines rather than a form count, which
-would overstate nested expressions. A file uses the average of its definitions, as
-the original formula does; summing them would make it a measure of file length. The
-report ranks on this comment-free score. `:maintainability-index` adds the comment
-term, can exceed 100, and is kept for information.
-
-`#?` reader conditionals are read for the running platform, so another platform's
-branch is not measured.
-
-Each metric namespace has a writ spec in `test/metrics/*_spec.clj` that states
-its contract (signatures, a state graph, a model law, and worked examples).
-The `*_test.clj` files cover the rest with plain `clojure.test`, and
-`walker_test.clj` pins what the reader counts with golden examples.
+clamped at 0. A definition uses its source lines rather than a form count,
+which would overstate nested expressions. A file uses the average of its
+definitions, as the original formula does; a sum would just measure file
+length. The report ranks on this comment-free score. `:maintainability-index`
+adds the comment term, can exceed 100, and is informational.
 
 ## Named helpers
 
-A function's named inner helpers are measured on their own, not charged to it. Each
-function a `letfn` binds is a unit named `outer/helper`, with its own complexity,
-nesting, lines and parameters, and its kind is `:helper`. A helper's helpers are
-`outer/helper/inner`. The outer function keeps its own code and lines and none of
-theirs; an anonymous `fn` has no name to stand on its own under, so it stays part of
-the function around it. In Scheme, a `define` of a function inside another and a
-lambda bound by `letrec` or `letrec*` are helpers the same way. A lambda bound by a
-plain `let` is not, and a named `let` is a loop. Helpers are never cleanup candidates.
-A file's total complexity counts each helper as the function it is.
+Named inner helpers are measured on their own. Each function a `letfn` binds is
+a unit named `outer/helper` with its own complexity, nesting, lines and
+parameters, and kind `:helper`; its own helpers are `outer/helper/inner`. The
+outer function keeps only its own code and lines. An anonymous `fn` has no name
+to stand under, so it stays part of the enclosing function. In Scheme, a
+`define` of a function inside another and a lambda bound by `letrec` or
+`letrec*` are helpers too; a lambda bound by plain `let` isn't, and a named
+`let` is a loop. Helpers are never cleanup candidates, and a file's total
+complexity counts each one as a function.
 
 ## The decision table
 
 Cyclomatic complexity counts one decision point per:
 
-- `if if-not if-let if-some when when-not when-let when-some when-first` — 1
-- `cond` — 1 per clause; a trailing keyword or `true` test is the free default
-- `condp` — 1 per clause; a lone trailing form is the free default
-- `case` — 1 per case except the default
-- `cond-> cond->>` — 1 per clause
-- `and or` — 1 per operator, so n-1 for n arguments
-- `for doseq` — 1 per binding, 1 per `:when` or `:while`
-- `dotimes while loop` — 1
-- `catch` — 1 (`try` itself is not a branch)
+- `if if-not if-let if-some when when-not when-let when-some when-first`: 1
+- `cond`: 1 per clause; a trailing keyword or `true` test is the free default
+- `condp`: 1 per clause; a lone trailing form is the free default
+- `case`: 1 per case except the default
+- `cond-> cond->>`: 1 per clause
+- `and or`: 1 per operator, so n-1 for n arguments
+- `for doseq`: 1 per binding, 1 per `:when` or `:while`
+- `dotimes while loop`: 1
+- `catch`: 1 (`try` itself is not a branch)
 
 Cognitive complexity follows the [SonarSource
 paper](https://www.sonarsource.com/docs/CognitiveComplexity.pdf):
@@ -659,9 +630,9 @@ paper](https://www.sonarsource.com/docs/CognitiveComplexity.pdf):
   null-coalescing operators
 - `fn`/`reify`/`proxy` add nothing but nest what they hold
 
-It differs from the paper in two ways. A plain `else` is free, since nearly every
-Clojure `if` has one. Recursion adds nothing, though the paper adds 1 per function
-in a cycle.
+Two differences from the paper: a plain `else` is free, since nearly every
+Clojure `if` has one, and recursion adds nothing, where the paper adds 1 per
+function in a cycle.
 
 ## Tests
 
@@ -670,9 +641,12 @@ jolt -M:test                      # everything
 jolt -M:test metrics.json-test    # only the namespaces named
 ```
 
-Runs every writ spec and the reader behaviour tests. Specs are discovered by
-directory scan; add a `*_spec.clj` file and it is picked up. To try specs against
-a writ checkout next to this one (`../writ`) instead of the pinned version, add the
+Each metric namespace has a writ spec in `test/metrics/*_spec.clj` stating its
+contract: signatures, a state graph, a model law, and worked examples. The
+`*_test.clj` files cover the rest with `clojure.test`, and `walker_test.clj`
+pins what the reader counts with golden examples. Specs are found by scanning
+the directory, so a new `*_spec.clj` is picked up automatically. To run them
+against a writ checkout at `../writ` instead of the pinned version, add the
 `:dev` alias: `jolt -M:test:dev`.
 
 `self_test.clj` runs the report on `src` and fails if anything is queued, so a
@@ -680,27 +654,24 @@ change that crosses a threshold has to refactor or argue the threshold down.
 
 ## CI and releases
 
-Every push to `main` and every pull request runs the tests. When they pass, CI runs
-the report on `src` and keeps `report.html`, `report.json` and `report.md` with the
-run as the `metrics-report` artifact, and the run's summary page shows the numbers.
+Every push to `main` and every pull request runs the tests. If they pass, CI
+runs the report on `src`, saves `report.html`, `report.json` and `report.md` as
+the `metrics-report` artifact, and shows the numbers on the run's summary page.
 
 Every run also builds the binary on macOS, Linux and Windows and runs
-`ci/smoke.sh` against the packaged archive, with jolt's dependency caches hidden
-and, on Windows, MSYS2 off the PATH, so a missing resource or DLL fails CI rather
-than a user's machine. The archives are kept with the run.
+`ci/smoke.sh` against the packaged archive, with jolt's dependency caches
+hidden and, on Windows, MSYS2 off the PATH. A missing resource or DLL fails CI
+instead of a user's machine. The archives are kept with the run.
 
-A release only happens after the tests pass, in one of two ways:
+Releases only happen after the tests pass. Either run the `ci` workflow from
+the Actions tab (*Run workflow* on `main`, with a version like `v0.2.0`) and CI
+tags the commit and creates the release, or push a version tag on a commit
+that's on `main`, for example `git tag v0.2.0 && git push origin v0.2.0`.
 
-- **From the Actions tab:** pick the `ci` workflow, choose *Run workflow* on `main`,
-  and give a version like `v0.2.0`. CI tags the commit and creates the release.
-- **From a tag:** push a version tag on a commit that's on `main`, for example
-  `git tag v0.2.0 && git push origin v0.2.0`.
-
-The release gets notes generated from the merged pull requests, with the three
-binaries and the three report files attached. The release is refused when the
-version isn't `vX.Y.Z`, when the tag or release already exists, when a manual run
-isn't on `main`, or when the commit isn't on `main`. A tag pushed with failing
-tests or a failing build stays a plain tag with no release.
+The release gets notes generated from merged pull requests, with the three
+binaries and three report files attached. It's refused when the version isn't
+`vX.Y.Z`, the tag or release already exists, or the run or commit isn't on
+`main`. A tag pushed with failing tests or a failing build stays a plain tag.
 
 ## Licence
 
