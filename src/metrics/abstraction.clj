@@ -438,19 +438,36 @@
   (let [id (eg/find g id)]
     (cons id (mapcat #(class-tree {:g g :ex ex} %) (subvec (second (get ex id)) 1)))))
 
-(defn- consumed
-  "The classes a match of p at c takes up, one entry per occurrence: c and those
-  under p's concrete nodes, not those its variables bind.  When several nodes of
-  c match, the first does."
-  [{:keys [g] :as ctx} p c]
+(declare takes)
+
+(defn- takes-children
+  "The ways child patterns ps match child classes cs in turn, threading s, each
+  with the classes taken up."
+  [ctx ps cs s]
+  (reduce (fn [acc [kp kc]]
+            (for [[taken s] acc [more s'] (takes ctx kp kc s)] [(into taken more) s']))
+          [[[] s]]
+          (map vector ps cs)))
+
+(defn- takes
+  "The ways pattern p matches class c, extending s, each with the classes the
+  match takes up: c and those under p's concrete nodes, not those its variables
+  bind.  [[classes s] ...]."
+  [{:keys [g] :as ctx} p c s]
   (case (first p)
-    :var []
-    :class (class-tree ctx c)
-    (let [n (first (filter (fn [n] (and (= (first n) (first p))
-                                        (every? (fn [[kp kc]] (seq (match g kp kc {})))
-                                                (map vector (rest p) (subvec n 1)))))
-                           (eg/nodes g c)))]
-      (cons (eg/find g c) (mapcat #(consumed ctx %1 %2) (rest p) (subvec n 1))))))
+    :var (map (fn [s] [[] s]) (match g p c s))
+    :class (when (= (eg/find g (second p)) (eg/find g c)) [[(class-tree ctx c) s]])
+    (for [n (eg/nodes g c)
+          :when (= (first n) (first p))
+          [taken s'] (takes-children ctx (rest p) (subvec n 1) s)]
+      [(into [(eg/find g c)] taken) s'])))
+
+(defn- consumed
+  "The classes a match of p at c takes up, one entry per occurrence.  When
+  several nodes of c match, the first does, its variables bound as they must be
+  for the whole of p."
+  [ctx p c]
+  (first (first (takes ctx p c {}))))
 
 (defn- shape
   "A pattern's form, size, arity and index key, or nil when it cannot be a
@@ -480,7 +497,17 @@
 (defn- left
   "How many of c's occurrences are not yet spent."
   [g spent c]
-  (max 0 (- (eg/occurrences g c) (get spent c 0))))
+  (max 0 (- (eg/occurrences g c) (reduce + 0 (vals (get spent c))))))
+
+(defn- live-units
+  "The definitions of c's occurrences not yet spent, one entry per occurrence."
+  [g spent c]
+  (loop [us (eg/units g c) used (get spent c {}) out []]
+    (if-let [[u & us] (seq us)]
+      (if (pos? (get used u 0))
+        (recur us (update used u dec) out)
+        (recur us used (conj out u)))
+      out)))
 
 (defn- rescore
   "A candidate scored on the code not yet spent, or nil if that is no longer
@@ -490,20 +517,23 @@
         uses (reduce + 0 (map #(left g spent %) live))
         saving (utility (:size o) (:arity o) uses)]
     (when (and (>= uses 2) (pos? saving))
-      (assoc o :uses uses :saving saving :live live))))
+      (assoc o :uses uses :saving saving :live live
+             :live-units (vec (mapcat #(live-units g spent %) live))))))
 
 (defn- spend
-  "spent with the code a chosen candidate's live matches take up added."
+  "spent, {class {unit count}}, with the code a chosen candidate's live matches
+  take up added: each class under a match is spent where the match still occurs."
   [g spent o]
   (reduce (fn [spent m]
-            (let [k (left g spent m)]
-              (reduce #(update %1 %2 (fnil + 0) k) spent (get (:consumed o) m))))
+            (let [us (frequencies (live-units g spent m))]
+              (reduce #(update %1 %2 (fnil (partial merge-with +) {}) us)
+                      spent (get (:consumed o) m))))
           spent (:live o)))
 
-(defn- reported [g units o]
+(defn- reported [units o]
   {:pattern (:pattern o) :size (Math/round (double (:size o))) :arity (:arity o)
    :uses (:uses o) :saving (Math/round (double (:saving o)))
-   :sites (vec (distinct (map #(site units %) (mapcat #(eg/units g %) (:live o)))))})
+   :sites (vec (distinct (map #(site units %) (:live-units o))))})
 
 (defn- select
   "Up to top opportunities, greedily: the one saving most is taken, the code its
@@ -516,7 +546,7 @@
     ;; stable: of equal savings the pattern found first, the one as written
     (let [best (first (sort-by (comp - :saving) (keep #(rescore g spent %) pool)))]
       (if (or (nil? best) (>= (count chosen) top))
-        (mapv #(reported g units %) chosen)
+        (mapv #(reported units %) chosen)
         (recur (conj chosen best)
                (spend g spent best)
                (remove #(identical? (:pattern %) (:pattern best)) pool))))))

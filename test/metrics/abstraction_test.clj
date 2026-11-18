@@ -133,3 +133,32 @@
     (is (seq found))
     (doseq [o found]
       (is (= (:uses o) (count (:sites o))) (pr-str o)))))
+
+(deftest a-match-takes-up-the-code-its-bindings-agree-on
+  ;; x = (f a (h b)) = (f a (h a)); (f ?a (h ?a)) matches only through the
+  ;; second, so a use of it takes up (h a), never (h b)
+  (let [enc #(ab/encode #{} %)
+        [g x] (eg/add-term eg/empty-graph (enc '(f a (h b))))
+        [g y] (eg/add-term g (enc '(f a (h a))))
+        [g hb] (eg/add-term g (enc '(h b)))
+        [g ha] (eg/add-term g (enc '(h a)))
+        g (eg/rebuild (eg/union g x y))
+        sym (fn [s] (some #(when (= #{[[:sym s]]} (eg/nodes g %)) %) (eg/class-ids g)))
+        p [[:list 3] [:class (sym "f")] [:var 0] [[:list 2] [:class (sym "h")] [:var 0]]]
+        ctx (assoc (#'ab/context g {}) :opts ab/defaults)
+        taken (set (#'ab/consumed ctx p x))]
+    (is (contains? taken (eg/find g ha)))
+    (is (not (contains? taken (eg/find g hb))))))
+
+(deftest sites-are-the-uses-still-left
+  ;; the inner shape is taken up inside the outer one in a, b and c, so what
+  ;; is left of it is in d and e alone
+  (let [inner '(inner :k 1 2 3 4 5 6)
+        outer (list 'outer 1 2 3 4 5 6 7 inner)
+        units (concat (for [n ["a" "b" "c"]] (unit n '[] outer))
+                      (for [n ["d" "e"]] (unit n '[] inner)))
+        found (ab/opportunities units {:min-size 6})
+        o (first (filter #(= inner (:pattern %)) found))]
+    (is (some? o))
+    (is (= 2 (:uses o)))
+    (is (= #{"d" "e"} (set (map :name (:sites o)))))))
