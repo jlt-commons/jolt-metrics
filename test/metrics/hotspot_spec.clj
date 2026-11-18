@@ -48,5 +48,11 @@
 (law churn-alone-is-not-full-risk
   (= (hs/risk 10 50 10 0) 0.0))
 
+;; a young project's top file, 5 changes and complexity 113: against its own
+;; maxima it is at the corner, against a floor of 20 changes a quarter of the way
+(law a-floor-takes-the-top-file-off-the-corner
+  (and (= (hs/risk 5 113 5 113) 1.0)
+       (= (hs/risk 20 113 5 113) 0.25)))
+
 (law halfway-on-both-axes
   (= (int (* 1000 (hs/risk 10 10 5 5))) 292))

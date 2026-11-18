@@ -14,7 +14,9 @@
   "Every limit.  For the counts a value over :warning is a warning and over
   :critical is critical; the maintainability index is the other way round, a
   warning at or under :warning and critical under :critical; hotspot risk is a
-  warning or critical from its limit up."
+  warning or critical from its limit up.  Hotspot risk scales a file's changes
+  and complexity by the project's most, or by the floors when those are higher,
+  so the top file of a young or quiet project isn't at full risk by default."
   {:cyclomatic {:warning 10 :critical 20}
    :cognitive {:warning 15 :critical 25}
    :nesting {:warning 3 :critical 5}
@@ -23,7 +25,8 @@
    :maintainability {:warning 38.0 :critical 10.0}
    :file-lines {:warning 500 :critical 1000}
    :efferent {:warning 19 :critical 39}
-   :hotspot {:warning 0.5 :critical 0.8 :min-changes 3}
+   :hotspot {:warning 0.5 :critical 0.8 :min-changes 3
+             :changes-floor 20 :complexity-floor 100}
    :unusual {:z (double entropy/z-limit)}
    :duplicates {:max-distance compression/max-distance :min-tokens compression/min-tokens}})
 
@@ -44,7 +47,9 @@
                                 :critical [whole? "a whole number"]}))
    {:maintainability {:warning [number? "a number"] :critical [number? "a number"]}
     :hotspot {:warning [share? "between 0 and 1"] :critical [share? "between 0 and 1"]
-              :min-changes [whole? "a whole number"]}
+              :min-changes [whole? "a whole number"]
+              :changes-floor [whole? "a whole number"]
+              :complexity-floor [whole? "a whole number"]}
     :unusual {:z [positive? "a positive number"]}
     :duplicates {:max-distance [share? "between 0 and 1"]
                  :min-tokens [whole? "a whole number"]}}))
