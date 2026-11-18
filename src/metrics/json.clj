@@ -47,7 +47,8 @@
      "instability_avg" (:avg-instability summary)
      "entropy_avg" (:avg-entropy summary)
      "redundancy_avg" (:avg-redundancy summary)
-     "duplicates" (:duplicates summary)}))
+     "duplicates" (:duplicates summary)
+     "abstractions" (:abstractions summary)}))
 
 (defn- violation [{:keys [rule value limit band]}]
   {"rule" rule "value" value "limit" limit "band" band})
@@ -128,6 +129,13 @@
   (into {} (for [[k limits] (or (:thresholds result) thresholds/defaults)]
              [(snake k) (into {} (for [[sub v] limits] [(snake sub) v]))])))
 
+(defn- unusual-file [{:keys [path surprisal z words]}]
+  {"path" path "surprisal" surprisal "z" z "words" words})
+
+(defn- abstraction [{:keys [pattern size arity uses saving sites]}]
+  {"pattern" (pr-str pattern) "size" size "arity" arity "uses" uses "saving" saving
+   "sites" (mapv (fn [{:keys [path name line]}] {"path" path "name" name "line" line}) sites)})
+
 (defn report
   "The lean report for an analysis result, as data with string keys."
   [result]
@@ -138,12 +146,11 @@
     "findings" (vec (map-indexed finding (:queue result)))
     "hotspots" (hotspots result)
     "unusual_changes" (unusual-changes result)
-    "unusual_files" (mapv (fn [{:keys [path surprisal z words]}]
-                            {"path" path "surprisal" surprisal "z" z "words" words})
-                          (:unusual-files result))
+    "unusual_files" (mapv unusual-file (:unusual-files result))
     "duplicates" (mapv (fn [{:keys [distance a b]}]
                          {"distance" distance "a" (named-span a) "b" (named-span b)})
                        (:duplicates result))
+    "abstractions" (some->> (:abstractions result) (mapv abstraction))
     "thresholds" (limits result)
     "cleanup" (cleanup (:cleanup result))
     "errors" (mapv (fn [{:keys [path error]}] {"path" path "error" error}) (:errors result))

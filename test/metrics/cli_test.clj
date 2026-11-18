@@ -18,7 +18,7 @@
     (is (str/starts-with? out "# Code Metrics Report"))))
 
 (deftest edn-output-reads-back
-  (let [{:keys [exit out]} (cli/run ["src" "--format" "edn" "--no-git"])
+  (let [{:keys [exit out]} (cli/run ["src" "--format" "edn" "--no-git" "--no-abstractions"])
         data (read-string out)]
     (is (= 0 exit))
     (is (seq (:files data)))
@@ -26,20 +26,20 @@
     (is (contains? data :cleanup))))
 
 (deftest git-history-feeds-the-report
-  (let [data (read-string (:out (cli/run ["src" "--format" "edn" "--days" "36500"])))]
+  (let [data (read-string (:out (cli/run ["src" "--no-abstractions" "--format" "edn" "--days" "36500"])))]
     (is (= 36500 (:days data)))
     (is (pos? (get-in data [:changes "src/metrics/cli.clj"] 0)))))
 
 (deftest no-git-means-no-history
-  (let [data (read-string (:out (cli/run ["src" "--format" "edn" "--no-git"])))]
+  (let [data (read-string (:out (cli/run ["src" "--format" "edn" "--no-git" "--no-abstractions"])))]
     (is (nil? (:changes data)))))
 
 (deftest top-caps-the-markdown-queue
-  (is (zero? (:exit (cli/run ["src" "--top" "1"])))))
+  (is (zero? (:exit (cli/run ["src" "--no-abstractions" "--top" "1"])))))
 
 (deftest output-still-goes-to-a-file
   (let [path (str (System/getProperty "java.io.tmpdir") "/jolt-metrics-cli-test.md")
-        {:keys [exit out]} (cli/run ["src" path "--no-git"])]
+        {:keys [exit out]} (cli/run ["src" path "--no-git" "--no-abstractions"])]
     (is (= 0 exit))
     (is (str/includes? out path))
     (is (str/starts-with? (slurp path) "# Code Metrics Report"))))
@@ -74,12 +74,12 @@
     (doseq [[file prefix] [["r.html" "<!doctype html>"] ["r.HTM" "<!doctype html>"]
                            ["r.json" "{"] ["r.edn" "{:"] ["r.md" "# Code Metrics Report"]
                            ["r.txt" "# Code Metrics Report"]]]
-      (is (zero? (:exit (cli/run ["src" (str dir "/" file) "--no-git"]))) file)
+      (is (zero? (:exit (cli/run ["src" (str dir "/" file) "--no-git" "--no-abstractions"]))) file)
       (is (str/starts-with? (slurp (str dir "/" file)) prefix) file))))
 
 (deftest an-explicit-format-beats-the-extension
   (let [path (str (fs/create-temp-dir) "/r.html")]
-    (cli/run ["src" path "--format" "md" "--no-git"])
+    (cli/run ["src" path "--format" "md" "--no-git" "--no-abstractions"])
     (is (str/starts-with? (slurp path) "# Code Metrics Report"))))
 
 ;; --- exclusions and the config file ----------------------------------------

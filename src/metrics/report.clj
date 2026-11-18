@@ -233,7 +233,8 @@
        (str "| Average instability | " (fmt (:avg-instability summary)) " |\n")
        (str "| Average entropy per file | " (fmt (:avg-entropy summary)) " |\n")
        (str "| Average redundancy per file | " (fmt (:avg-redundancy summary)) " |\n")
-       (str "| Near-duplicate pairs | " (:duplicates summary) " |\n")))
+       (str "| Near-duplicate pairs | " (:duplicates summary) " |\n")
+       (str "| Abstraction opportunities | " (or (:abstractions summary) "skipped") " |\n")))
 
 (defn render-files [files]
   (str "## Files\n\n"
@@ -327,6 +328,46 @@
          "_none_\n")
        "\n"))
 
+;; --- abstraction opportunities ---------------------------------------------
+
+(defn abstractions-intro
+  "What the abstraction opportunities section shows, said once for every format."
+  [limits]
+  (str "Code shapes that recur often enough for one function to replace them. "
+       "Each pattern is the most specific code its uses share, with ?a, ?b and so "
+       "on where they differ; a variable in a binding position is a local of the "
+       "new function, not a parameter. Saves is roughly how many syntax nodes "
+       "extracting it removes: every use becomes a call, less the new definition. "
+       "Threading macros, when, when-not and if-not are seen through, so sugared and "
+       "plain code match. Tests aside; patterns of at least "
+       (get-in limits [:abstractions :min-size]) " nodes with at most "
+       (get-in limits [:abstractions :max-arity]) " parameters."))
+
+(defn sites-text
+  "Where an abstraction is used: the first three definitions, then how many more."
+  [sites]
+  (str (str/join ", " (for [{:keys [path name line]} (take 3 sites)]
+                        (str name " (" path ":" line ")")))
+       (when (> (count sites) 3) (str " and " (- (count sites) 3) " more"))))
+
+(defn render-abstractions
+  "The abstraction opportunities, the top of them by what they save."
+  [{:keys [abstractions] :as result} top]
+  (str "## Abstraction opportunities\n\n"
+       (abstractions-intro (limits-of result)) "\n\n"
+       (cond
+         (nil? abstractions) "Not looked for (`--no-abstractions`).\n"
+         (empty? abstractions) "_none_\n"
+         :else
+         (str "| Saves | Uses | Params | Pattern | Where |\n|---|---|---|---|---|\n"
+              (apply str (for [{:keys [saving uses arity pattern sites]} (take top abstractions)]
+                           (str "| " saving " | " uses " | " arity
+                                " | " (cell (str "`" (pr-str pattern) "`"))
+                                " | " (cell (sites-text sites)) " |\n")))
+              (when (> (count abstractions) top)
+                (str "\n" (- (count abstractions) top) " more in the EDN and JSON output.\n"))))
+       "\n"))
+
 (defn render
   "The full Markdown report for an analysis result."
   ([result] (render result nil))
@@ -341,6 +382,7 @@
         (render-unusual result)
         (render-unusual-files result)
         (render-duplicates result (or top default-top))
+        (render-abstractions result (or top default-top))
         (render-cleanup cleanup)
         (render-files files)
         "\n"

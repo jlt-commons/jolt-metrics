@@ -7,7 +7,8 @@
 
   A project names only what it changes; the rest keep their defaults.  The README
   lists where each default comes from."
-  (:require [metrics.compression :as compression]
+  (:require [metrics.abstraction :as abstraction]
+            [metrics.compression :as compression]
             [metrics.entropy :as entropy]))
 
 (def defaults
@@ -28,7 +29,8 @@
    :hotspot {:warning 0.5 :critical 0.8 :min-changes 3
              :changes-floor 20 :complexity-floor 100}
    :unusual {:z (double entropy/z-limit)}
-   :duplicates {:max-distance compression/max-distance :min-tokens compression/min-tokens}})
+   :duplicates {:max-distance compression/max-distance :min-tokens compression/min-tokens}
+   :abstractions (select-keys abstraction/defaults [:min-size :max-arity])})
 
 (def count-rules
   "The rules over counts, where higher is worse and limits are whole numbers."
@@ -52,7 +54,9 @@
               :complexity-floor [whole? "a whole number"]}
     :unusual {:z [positive? "a positive number"]}
     :duplicates {:max-distance [share? "between 0 and 1"]
-                 :min-tokens [whole? "a whole number"]}}))
+                 :min-tokens [whole? "a whole number"]}
+    :abstractions {:min-size [whole? "a whole number"]
+                   :max-arity [whole? "a whole number"]}}))
 
 (defn- key-problems
   "What is wrong with one key's map of limits."

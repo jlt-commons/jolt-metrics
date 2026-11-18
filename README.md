@@ -28,6 +28,7 @@ stated contract, not just unit tests.
 | **Entropy / surprisal** | `metrics.entropy` | a file's word entropy, and how unexpected its words are given the rest of the project |
 | **Compressed size / redundancy** | `metrics.compression` | an upper bound on a definition's or file's Kolmogorov complexity, and how much of a file is repetition |
 | **Near-duplicates** | `metrics.compression` | pairs of definitions whose normalized compression distance says one is nearly a copy of the other |
+| **Abstraction opportunities** | `metrics.abstraction` | code shapes that recur often enough for one function to replace them, with their parameters and what extracting them saves |
 
 ## Usage
 
@@ -62,6 +63,7 @@ jolt -m metrics.cli --help
 | `--commits N` | 500 | how many recent commits to check for unusual changes |
 | `--no-git` | | skip git history, so no churn, hotspots or unusual changes |
 | `--no-gitignore` | | analyze files git ignores too; they're left out by default |
+| `--no-abstractions` | | skip the search for abstraction opportunities, the slowest pass |
 | `--exclude GLOB` | | leave out matching files, relative to the directory; can be repeated |
 | `--config FILE` | `<dir>/.jolt-metrics.edn` | the config file |
 
@@ -130,6 +132,7 @@ show them, EDN has the whole map under `:thresholds`, and JSON has it under
 | `:hotspot` | `{:warning 0.5 :critical 0.8 :min-changes 3 :changes-floor 20 :complexity-floor 100}` | hotspot risk from `:warning` up is a warning, from `:critical` up critical; a file needs `:min-changes` recent changes to have a risk at all; the floors are the least changes and file complexity risk is scaled by (see [Hotspots](#hotspots)) |
 | `:unusual` | `{:z 3.0}` | how many standard deviations make a commit or a file unusual |
 | `:duplicates` | `{:max-distance 0.35 :min-tokens 40}` | the largest compression distance a near-duplicate pair can have, and the fewest tokens a definition needs to be compared |
+| `:abstractions` | `{:min-size 8 :max-arity 4}` | the fewest syntax nodes an abstraction opportunity can have, and the most parameters it can take |
 
 The count limits are whole numbers, the hotspot limits and `:max-distance` lie
 between 0 and 1, and `:z` is positive. A `:warning` past its `:critical` (the other
@@ -160,14 +163,16 @@ on unusual changes and near-duplicates.
    project's other files'. See below.
 7. **Near-duplicates**: pairs of definitions that are near-copies, closest first.
    See below.
-8. **Cleanup candidates**: unused requires, and functions nothing mentions. A
+8. **Abstraction opportunities**: code shapes that one function could replace,
+   with holes where the uses differ, most saving first. See below.
+9. **Cleanup candidates**: unused requires, and functions nothing mentions. A
    require counts as used when anything it brings in is, so an idle alias beside a
    used `:refer` isn't listed, while referred names nobody uses are. Matching
    is by name and conservative, but runtime lookups and outside callers can't be
    seen, so check public functions before removing them, and name your API
    namespaces in the config to keep them off the list.
-9. **Files** and **Architecture**: the numbers per file, coupling, and dependencies.
-10. **Thresholds**: what the severities mean.
+10. **Files** and **Architecture**: the numbers per file, coupling, and dependencies.
+11. **Thresholds**: what the severities mean.
 
 | Rule | Warning | Critical | Where the limits come from |
 |---|---|---|---|
@@ -319,6 +324,62 @@ though definitions with the same tokens never are. On clojure-lsp's 1334
 functions it found the same 54 pairs as comparing every pair, in about a second
 of CPU time; the rest of the analysis takes about six.
 
+### Abstraction opportunities
+
+Near-duplicates say two definitions are alike. Abstraction opportunities say what
+code recurs, anywhere in the project and at any size above a floor, with
+variables where its uses differ:
+
+```
+(z/find-token ?a (fn [?b] (= ?c (z/string ?b))))    ; 9 uses, 2 parameters
+```
+
+The method is babble's (Cao, Kunkel, Nandi, Willsey, Tatlock and Polikarpova,
+[babble: Learning better abstractions with e-graphs and
+anti-unification](https://arxiv.org/abs/2212.04596), POPL 2023):
+
+1. Every definition goes into one e-graph (`metrics.egraph`, built as in Willsey
+   et al., [egg: Fast and extensible equality
+   saturation](https://arxiv.org/abs/2004.03082), POPL 2021), which shares
+   equal subterms. Rewrites that only undo sugar are applied until nothing
+   changes: `->`, `->>`, `when`, `when-not`, `if-not` and an explicit `nil`
+   else. A form written with `->` and the same code written as nested calls then
+   sit in one e-class.
+2. Pairs of e-classes are anti-unified: the most specific pattern both fit is
+   found, trying every pair of their nodes with the same operator, so it can be
+   found through either spelling. As in Plotkin's original, the same pair of
+   differing subterms is always the same variable. Locals always become
+   variables, since their names mean nothing outside their definition, and a
+   variable in a binding position is a local of the new function rather than a
+   parameter. A pattern that would need a variable for a whole binding vector
+   or parameter list is dropped: that's a macro's job.
+3. Each pattern is matched over the e-graph to count its uses and scored as
+   Stitch does (Bowers et al., [Top-down synthesis for library
+   learning](https://arxiv.org/abs/2211.16605), POPL 2023): every use saves the
+   pattern's size less a call of two nodes, and the new definition costs the
+   pattern, a node per parameter and three more. Patterns are taken greedily,
+   most saving first, and the code each one takes up is spent, so its
+   generalizations and its pieces don't come back as separate entries.
+
+Comparing every pair of e-classes is quadratic, so only classes with the same
+operator and head are compared, each with its next 8 neighbours in a sort by
+shape: the sorted-neighbourhood method of record linkage (Hernández and Stolfo,
+[The merge/purge problem for large
+databases](https://dl.acm.org/doi/10.1145/223784.223807), 1995). Copies sort
+together, so a pattern with several uses very likely has some pair of them
+compared. Strings keep their text here, unlike in compression, because an
+extracted function would have to take a differing string as a parameter.
+
+Saves counts syntax nodes and is a lower bound: a node only a rewrite made counts
+for nothing, so the pattern is shown as written. Patterns need at least 8 nodes
+and at most 4 parameters; `:abstractions` in the config changes both. Tests are
+left out. The result keeps the best 50.
+
+On clojure-lsp's 1435 definitions the search takes about 5 seconds, most of the
+report's time, so `--no-abstractions` skips it. Its top finding is the
+code-action map `{:command {:arguments ?a :command ?b :title ?c} :kind ?d :title
+?c}`, built by hand 33 times.
+
 ### JSON
 
 `--format json` is the lean report: what to act on, in a shape tools can rely on.
@@ -329,6 +390,7 @@ where EDN is 130 KB.
 ```json
 {"tool": "jolt-metrics", "schema_version": 1,
  "summary": {...}, "findings": [...], "hotspots": [...], "duplicates": [...],
+ "abstractions": [...],
  "thresholds": {...}, "cleanup": {...},
  "errors": [...], "files": [...], "dependencies": [...]}
 ```
@@ -336,13 +398,14 @@ where EDN is 130 KB.
 | Key | Holds |
 |---|---|
 | `schema_version` | 1; it goes up when a key is removed or changes meaning |
-| `summary` | `critical`, `warnings`, `files`, `files_not_analyzed`, `loc`, `sloc`, `cloc`, `functions`, `cyclomatic_total`, `cyclomatic_avg`, `cognitive_total`, `maintainability_avg`, `instability_avg`, `entropy_avg`, `redundancy_avg`, `duplicates` (how many pairs) |
+| `summary` | `critical`, `warnings`, `files`, `files_not_analyzed`, `loc`, `sloc`, `cloc`, `functions`, `cyclomatic_total`, `cyclomatic_avg`, `cognitive_total`, `maintainability_avg`, `instability_avg`, `entropy_avg`, `redundancy_avg`, `duplicates` (how many pairs), `abstractions` (how many; `null` under `--no-abstractions`) |
 | `findings` | the whole queue, worst first and never capped by `--top`: `rank`, `severity`, `kind`, `name`, `path`, `line`, `end_line`, `changes`, `score`, `metrics`, `violations` (`rule`, `value`, `limit`, `band`), `actions` |
 | `hotspots` | `path`, `changes`, `complexity`, `risk`; `null` under `--no-git` |
 | `unusual_changes` | `commits` (how many were checked) and `changes`, most unusual first: `commit`, `date`, `subject`, `delta` (bits), `z`, `files`; `null` under `--no-git` |
 | `unusual_files` | `path`, `surprisal` (bits a word), `z`, `words`, most surprising first |
 | `duplicates` | `distance`, and `a` and `b`, each `path`, `name`, `line`, `end_line`; closest first |
-| `thresholds` | the limits the report used, as in [Thresholds](#thresholds), keys in snake_case: `cyclomatic`, ..., `file_lines`, `hotspot` (`warning`, `critical`, `min_changes`), `unusual` (`z`), `duplicates` (`max_distance`, `min_tokens`) |
+| `abstractions` | `pattern` (as Clojure text), `size`, `arity`, `uses`, `saving`, and `sites`, each `path`, `name`, `line`; most saving first; `null` under `--no-abstractions` |
+| `thresholds` | the limits the report used, as in [Thresholds](#thresholds), keys in snake_case: `cyclomatic`, ..., `file_lines`, `hotspot` (`warning`, `critical`, `min_changes`), `unusual` (`z`), `duplicates` (`max_distance`, `min_tokens`), `abstractions` (`min_size`, `max_arity`) |
 | `cleanup` | `unused_requires` (`path`, `lib`, `alias`, `refers`), `unused_private` and `unreferenced_public` (`path`, `name`, `line`) |
 | `errors` | `path`, `error` for each file not analyzed |
 | `files` | `path`, `language`, `namespace`, `loc`, `sloc`, `cloc`, `cyclomatic`, `cognitive`, `maintainability`, `efferent`, `afferent`, `instability`, `instability_band`, `changes`, `entropy`, `surprisal`, `compressed_size` (bytes), `redundancy` |
