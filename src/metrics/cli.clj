@@ -29,6 +29,8 @@ Prints the report, or writes it to out.
                     (default 500)
   --no-git          Skip git history: no churn, hotspots or unusual changes
   --no-gitignore    Analyze files git ignores too (they're left out by default)
+  --no-abstractions Skip the search for abstraction opportunities, the
+                    slowest pass
   --exclude GLOB    Leave out matching files, relative to <dir>; can be repeated
   --config FILE     The config file (default <dir>/.jolt-metrics.edn)
   -h, --help        Show this")
@@ -40,7 +42,8 @@ Prints the report, or writes it to out.
     (parse-long text)))
 
 (def ^:private default-options
-  {:days 90 :commits 500 :git true :gitignore true :top report/default-top :paths []})
+  {:days 90 :commits 500 :git true :gitignore true :abstractions true
+   :top report/default-top :paths []})
 
 (def ^:private formats #{"md" "edn" "json" "html"})
 
@@ -58,6 +61,10 @@ Prints the report, or writes it to out.
    "--top" {:key :top :parse count-value :error "--top takes a number"}
    "--exclude" {:key :exclude :parse identity :many true :error "--exclude takes a glob"}
    "--config" {:key :config :parse identity :error "--config takes a file"}})
+
+(def ^:private off-flags
+  "The flags that turn something off, and the option each sets to false."
+  {"--no-git" :git "--no-gitignore" :gitignore "--no-abstractions" :abstractions})
 
 (defn- with-option
   "opts with an option's value set, or added to the others if it can be repeated."
@@ -77,8 +84,7 @@ Prints the report, or writes it to out.
       (cond
         (empty? args) opts
         (contains? #{"-h" "--help"} a) (assoc opts :help true)
-        (= "--no-git" a) (recur (rest args) (assoc opts :git false))
-        (= "--no-gitignore" a) (recur (rest args) (assoc opts :gitignore false))
+        (contains? off-flags a) (recur (rest args) (assoc opts (off-flags a) false))
         (some? value) (recur (drop 2 args) (with-option opts option value))
         option (assoc opts :error (:error option))
         (str/starts-with? a "-") (assoc opts :error (str "unknown option: " a))
@@ -106,14 +112,15 @@ Prints the report, or writes it to out.
 
 (defn- analyze
   "Analyze dir, with the flags adding to what the config says."
-  [dir project-config {:keys [git gitignore days commits exclude]}]
+  [dir project-config {:keys [git gitignore days commits exclude abstractions]}]
   (let [opts {:days days
               :exclude (concat (:exclude project-config) exclude)
               :ignored (when gitignore (git/ignored dir))
               :test-paths (:test-paths project-config)
               :api-namespaces (:api-namespaces project-config)
               :api-paths (:api-paths project-config)
-              :thresholds (:thresholds project-config)}]
+              :thresholds (:thresholds project-config)
+              :abstractions abstractions}]
     (core/analyze-dir dir (assoc opts
                                  :changes (when git (git/changes dir days))
                                  :history (when git

@@ -90,7 +90,8 @@
      ["Average instability" (:avg-instability summary)]
      ["Average entropy per file" (:avg-entropy summary)]
      ["Average redundancy per file" (:avg-redundancy summary)]
-     ["Near-duplicate pairs" (:duplicates summary)]]))
+     ["Near-duplicate pairs" (:duplicates summary)]
+     ["Abstraction opportunities" (:abstractions summary)]]))
 
 (defn- summary-section [summary entries]
   (section "summary" "Summary"
@@ -185,6 +186,21 @@
 
 (defn- duplicate-place [{:keys [path name line end-line]}]
   [:td [:code name] " (" path ":" line "-" end-line ")"])
+
+(defn- abstractions-section [{:keys [abstractions] :as result} top]
+  (section "abstractions" "Abstraction opportunities"
+           [:p (report/abstractions-intro (report/limits-of result))]
+           (cond
+             (nil? abstractions) [:p "Not looked for (" [:code "--no-abstractions"] ")."]
+             (empty? abstractions) [:p [:em "none"]]
+             :else
+             (list
+              (table {:class "sortable"} ["Saves" "Uses" "Params" "Pattern" "Where"]
+                     (for [{:keys [saving uses arity pattern sites]} (take top abstractions)]
+                       [(num-cell saving) (num-cell uses) (num-cell arity)
+                        [:td [:code (pr-str pattern)]]
+                        [:td (report/sites-text sites)]]))
+              (more-line top (count abstractions))))))
 
 (defn- duplicates-section [{:keys [duplicates] :as result} top]
   (section "duplicates" "Near-duplicates"
@@ -298,6 +314,7 @@
    (unusual-section result)
    (unusual-files-section result)
    (duplicates-section result top)
+   (abstractions-section result top)
    (cleanup-section cleanup)
    (files-section files)
    (architecture-section files edges)

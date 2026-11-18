@@ -23,7 +23,7 @@
 
 (def ^:private fn-forms '#{fn fn* defn defn- defmacro})
 
-(defn- bound-symbols
+(defn bound-symbols
   "The local names a binding pattern introduces: every plain symbol in it, as
   destructuring allows, but `&`."
   [pattern]
@@ -44,7 +44,7 @@
     [(first tail)]
     (keep #(when (and (seq? %) (vector? (first %))) (first %)) tail)))
 
-(defn- introduced
+(defn introduced
   "The locals one list form introduces itself, not those of the forms in it."
   [form]
   (let [h (head-name form)]
@@ -61,7 +61,7 @@
       (= 'catch h) (bound-symbols [(nth form 2 nil)])
       :else nil)))
 
-(defn- locals
+(defn locals
   "Every local name forms introduce, at any depth."
   [forms]
   (set (mapcat introduced (filter seq? (tree-seq coll? seq forms)))))

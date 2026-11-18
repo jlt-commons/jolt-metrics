@@ -17,6 +17,7 @@
             [metrics.cleanup :as cleanup]
             [metrics.entropy :as entropy]
             [metrics.compression :as compression]
+            [metrics.abstraction :as abstraction]
             [metrics.tokens :as tokens]
             [metrics.thresholds :as thresholds]
             [metrics.callgraph :as callgraph]
@@ -93,7 +94,7 @@
         cc (cyclomatic/complexity (:decision-kinds f))
         {:keys [end-line locs]} (unit-lines f scanned)]
     (merge
-     (select-keys f [:kind :line :lloc :params :self-refs])
+     (select-keys f [:kind :line :lloc :params :self-refs :param-vectors :body])
      {:name (str (:name f))
       :end-line end-line
       :private (boolean (:private f))}
@@ -265,7 +266,7 @@
   (-> file
       (dissoc :symbols :qualifiers :libspecs :unused-public? :load-paths :word-counts
               :index-analysis)
-      (update :functions (fn [fns] (mapv #(dissoc % :self-refs :tokens) fns)))))
+      (update :functions (fn [fns] (mapv #(dissoc % :self-refs :tokens :param-vectors :body) fns)))))
 
 (defn- near-duplicates
   "The pairs of definitions, tests aside, that are near-copies of each other."
@@ -278,6 +279,22 @@
        (assoc (select-keys fun [:name :line :end-line :tokens]) :path (:path f)))
      (double max-distance)
      min-tokens)))
+
+(def ^:private abstractions-kept
+  "How many abstraction opportunities the result keeps; the Markdown and HTML
+  show the first --top of them."
+  50)
+
+(defn- abstractions
+  "The code shapes, tests aside, that one function could replace."
+  [limits files]
+  (let [{:keys [min-size max-arity]} (:abstractions limits)]
+    (abstraction/opportunities
+     (for [f (remove :test? files)
+           fun (:functions f)
+           :when (not= :test (:kind fun))]
+       (assoc (select-keys fun [:name :line :param-vectors :body]) :path (:path f)))
+     {:min-size min-size :max-arity max-arity :top abstractions-kept})))
 
 (defn- load-all
   "Analyze [path load-source] pairs into {:files :errors}.  A file that cannot be
@@ -342,12 +359,22 @@
           files)))
 
 (defn- information-findings
-  "What stands out in the project's information: unusual commits, unusual files
-  and near-duplicate definitions."
-  [limits files history]
+  "What stands out in the project's information: unusual commits, unusual files,
+  near-duplicate definitions and, unless skip-abstractions?, abstraction
+  opportunities."
+  [limits files history skip-abstractions?]
   {:unusual-changes (unusual-changes limits history)
    :unusual-files (unusual-files limits files)
-   :duplicates (near-duplicates limits files)})
+   :duplicates (near-duplicates limits files)
+   :abstractions (when-not skip-abstractions? (abstractions limits files))})
+
+(defn- result-summary
+  "The project rollups, with how many near-duplicates and abstraction
+  opportunities were found; nil for the second when it was skipped."
+  [files errors findings]
+  (assoc (summarize files (count errors))
+         :duplicates (count (:duplicates findings))
+         :abstractions (some-> (:abstractions findings) count)))
 
 (defn- queued
   "The work the limits find: the hotspots, and the refactoring queue."
@@ -370,12 +397,12 @@
                 (annotated-files files edges changes #(mark-test-file % root test-paths))))
         limits (thresholds/with-defaults (:thresholds opts))
         result-files (mapv public-file files)
-        findings (information-findings limits files history)]
+        findings (information-findings limits files history (false? (:abstractions opts)))]
     (merge findings (queued limits files)
            {:files result-files
             :errors errors
             :edges (vec edges)
-            :summary (assoc (summarize result-files (count errors)) :duplicates (count (:duplicates findings)))
+            :summary (result-summary result-files errors findings)
             :changes changes
             :days (when changes days)
             :thresholds limits
@@ -387,7 +414,8 @@
   :root and :test-paths to say what is test code, and :api-namespaces and
   :api-paths, namespace names or globs and path globs of files whose public
   functions are API and so never unused, and :thresholds, limits to use in place
-  of metrics.thresholds/defaults."
+  of metrics.thresholds/defaults.  :abstractions false skips the search for
+  abstraction opportunities, the slowest pass."
   ([file-sources] (analyze-files file-sources nil))
   ([file-sources opts]
    (analyze-loaded (map (fn [[p s]] [p (constantly s)]) file-sources) opts)))
