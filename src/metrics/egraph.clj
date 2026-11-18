@@ -212,31 +212,40 @@
       (< c (first best))
       (and (== c (first best)) (< (hash node) (hash (second best))))))
 
+(declare visit)
+
+(defn- node-cost
+  "A node's cost given its children's, or nil when a child has none yet."
+  [st path {:keys [source]} node]
+  (reduce (fn [acc kid]
+            (if-let [[c] (visit st kid path)] (+ acc c) (reduced nil)))
+          (if (contains? source node) 1.0 (+ 1.0 derived-cost))
+          (subvec node 1)))
+
+(defn- visit
+  "[cost node] for id's class, costing it and the classes under it into the
+  volatile (:best st); nil when id is already on path."
+  [{:keys [g best] :as st} id path]
+  (let [id (find g id)]
+    (or (get @best id)
+        (when-not (contains? path id)
+          (let [c (get-in g [:classes id])
+                path (conj path id)
+                choice (reduce (fn [b node]
+                                 (let [cost (node-cost st path c node)]
+                                   (if (and cost (cheaper? cost node b)) [cost node] b)))
+                               nil (:nodes c))]
+            (when choice (vswap! best assoc id choice))
+            choice)))))
+
 (defn extraction
   "The cheapest e-node of every class, counting one per node and a little more
   for a derived one: {id [cost node]}.  One depth-first pass, each class costed
   once; a node that leads back into a class still being costed is passed over,
   so a cycle never makes a term infinite."
   [g]
-  (let [best (volatile! {})
-        visit (fn visit [id path]
-                (let [id (find g id)]
-                  (or (get @best id)
-                      (when-not (contains? path id)
-                        (let [{:keys [nodes source]} (get-in g [:classes id])
-                              path (conj path id)
-                              cost-of (fn [node]
-                                        (reduce (fn [acc kid]
-                                                  (if-let [[c] (visit kid path)] (+ acc c) (reduced nil)))
-                                                (if (contains? source node) 1.0 (+ 1.0 derived-cost))
-                                                (subvec node 1)))
-                              choice (reduce (fn [b node]
-                                               (let [c (cost-of node)]
-                                                 (if (and c (cheaper? c node b)) [c node] b)))
-                                             nil nodes)]
-                          (when choice (vswap! best assoc id choice))
-                          choice)))))]
-    (doseq [id (class-ids g)] (visit id #{}))
+  (let [best (volatile! {})]
+    (doseq [id (class-ids g)] (visit {:g g :best best} id #{}))
     @best))
 
 (defn best-term
