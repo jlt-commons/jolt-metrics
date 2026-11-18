@@ -16,6 +16,9 @@
             [metrics.queue :as queue]
             [metrics.cleanup :as cleanup]
             [metrics.entropy :as entropy]
+            [metrics.compression :as compression]
+            [metrics.tokens :as tokens]
+            [metrics.thresholds :as thresholds]
             [metrics.callgraph :as callgraph]
             [jolt.fs :as fs]))
 
@@ -95,6 +98,8 @@
       :end-line end-line
       :private (boolean (:private f))}
      (function-scores f h cc locs)
+     (let [ts (tokens/code-tokens (:param-vectors f) (:body f))]
+       {:tokens ts :compressed-size (compression/size-of ts)})
      (index-fields (scope-index (:volume h) cc (:sloc locs) locs)))))
 
 (defn- file-index
@@ -135,6 +140,16 @@
     :unused-public? (:unused-public? lang)
     :imports (mapv str (:imports model))}))
 
+(defn- information-fields
+  "What a file's words and code tokens say of its information: the entropy of its
+  words, and how far its code compresses."
+  [source tokens]
+  (let [ws (entropy/words source)]
+    {:entropy (entropy/entropy ws)
+     :word-counts (frequencies ws)
+     :compressed-size (compression/size-of tokens)
+     :redundancy (compression/redundancy tokens)}))
+
 (defn analyze-source
   "Every metric for one file's source."
   [path source]
@@ -144,13 +159,11 @@
         scanned ((:scan lang) source)
         locs (loc/tally (:classes scanned))
         fns (mapv #(function-metrics % scanned) (:functions model))
-        file-h (average-halstead (map :halstead fns))
-        ws (entropy/words source)]
+        file-h (average-halstead (map :halstead fns))]
     (merge
      (file-facts path lang model)
+     (information-fields source (tokens/code-tokens [] forms))
      {:loc locs
-      :entropy (entropy/entropy ws)
-      :word-counts (frequencies ws)
       :functions (mapv #(dissoc % :halstead) fns)
       :halstead file-h
       :index-analysis (when-let [index (:index lang)] (index path source))}
@@ -176,17 +189,19 @@
      :avg-cyclomatic (average (map :cyclomatic fns))
      :avg-maintainability (average (keep :maintainability-index-without-comments files))
      :avg-instability (average (keep :instability files))
-     :avg-entropy (average (keep :entropy (remove :test? files)))}))
+     :avg-entropy (average (keep :entropy (remove :test? files)))
+     :avg-redundancy (average (keep :redundancy (remove :test? files)))}))
 
 (defn- risk-fn
   "A function giving a file's hotspot risk, or nil when it has too few changes to
   say anything.  Test files aren't hotspots, and don't set the scale either."
-  [files]
+  [limits files]
   (let [code (remove :test? files)
         max-changes (reduce max 0 (keep :changes code))
-        max-complexity (reduce max 0 (map :cyclomatic code))]
+        max-complexity (reduce max 0 (map :cyclomatic code))
+        min-changes (get-in limits [:hotspot :min-changes])]
     (fn [{:keys [changes cyclomatic test?]}]
-      (when (and changes (not test?) (>= changes queue/min-hotspot-changes))
+      (when (and changes (not test?) (>= changes min-changes))
         (hotspot/risk max-changes max-complexity changes cyclomatic)))))
 
 (def default-test-paths
@@ -206,10 +221,10 @@
 (defn- unusual-changes
   "The commits of a history that changed the code's entropy unusually, and how
   many commits it held; nil without one."
-  [history]
+  [limits history]
   (when history
     {:commits (count history)
-     :changes (entropy/unusual-changes history)}))
+     :changes (entropy/unusual-changes history (double (get-in limits [:unusual :z])))}))
 
 (defn- assoc-surprisal
   "Files with their word count, and the surprisal of each that isn't a test
@@ -225,11 +240,12 @@
 
 (defn- unusual-files
   "The files whose vocabulary is unusual for the project, with their word counts."
-  [files]
+  [limits files]
   (let [words (into {} (map (juxt :path :words)) files)]
     (mapv #(assoc % :words (words (:path %)))
           (entropy/unusual-files (mapv #(select-keys % [:path :surprisal])
-                                       (remove :test? files))))))
+                                       (remove :test? files))
+                                 (double (get-in limits [:unusual :z]))))))
 
 (defn- mark-test-file
   "Everything defined in a test file is test code, helpers included, so it isn't
@@ -247,7 +263,19 @@
   (-> file
       (dissoc :symbols :qualifiers :libspecs :unused-public? :load-paths :word-counts
               :index-analysis)
-      (update :functions (fn [fns] (mapv #(dissoc % :self-refs) fns)))))
+      (update :functions (fn [fns] (mapv #(dissoc % :self-refs :tokens) fns)))))
+
+(defn- near-duplicates
+  "The pairs of definitions, tests aside, that are near-copies of each other."
+  [limits files]
+  (let [{:keys [max-distance min-tokens]} (:duplicates limits)]
+    (compression/near-duplicates
+     (for [f (remove :test? files)
+           fun (:functions f)
+           :when (not= :test (:kind fun))]
+       (assoc (select-keys fun [:name :line :end-line :tokens]) :path (:path f)))
+     (double max-distance)
+     min-tokens)))
 
 (defn- load-all
   "Analyze [path load-source] pairs into {:files :errors}.  A file that cannot be
@@ -311,37 +339,53 @@
                   :changes (when changes (get changes (:path %) 0)))
           files)))
 
+(defn- information-findings
+  "What stands out in the project's information: unusual commits, unusual files
+  and near-duplicate definitions."
+  [limits files history]
+  {:unusual-changes (unusual-changes limits history)
+   :unusual-files (unusual-files limits files)
+   :duplicates (near-duplicates limits files)})
+
+(defn- queued
+  "The work the limits find: the hotspots, and the refactoring queue."
+  [limits files]
+  (let [risk-of (risk-fn limits files)]
+    {:hotspots (queue/hotspots limits files risk-of)
+     :queue (queue/build limits files risk-of)}))
+
 (defn- analyze-loaded
   "The whole result for [path load-source] pairs.  With :changes, a map of path to
   commit count over the last :days days, it also has churn: hotspots, and a queue
   that puts them first.  With :history, each commit's entropy change as
-  metrics.git/history gives it, it has the unusual ones."
+  metrics.git/history gives it, it has the unusual ones.  :thresholds are a
+  project's own limits, as metrics.thresholds takes them."
   [loaders {:keys [changes days root test-paths history] :as opts}]
   (let [{:keys [files errors]} (load-all loaders)
         edges (dependency-edges files root)
         files (assoc-surprisal
                (callgraph/annotate
                 (annotated-files files edges changes #(mark-test-file % root test-paths))))
-        risk-of (risk-fn files)
-        result-files (mapv public-file files)]
-    {:files result-files
-     :errors errors
-     :edges (vec edges)
-     :summary (summarize result-files (count errors))
-     :changes changes
-     :days (when changes days)
-     :hotspots (queue/hotspots files risk-of)
-     :queue (queue/build files risk-of)
-     :unusual-changes (unusual-changes history)
-     :unusual-files (unusual-files files)
-     :cleanup (cleanup/candidates-of files (select-keys opts [:root :api-namespaces :api-paths]))}))
+        limits (thresholds/with-defaults (:thresholds opts))
+        result-files (mapv public-file files)
+        findings (information-findings limits files history)]
+    (merge findings (queued limits files)
+           {:files result-files
+            :errors errors
+            :edges (vec edges)
+            :summary (assoc (summarize result-files (count errors)) :duplicates (count (:duplicates findings)))
+            :changes changes
+            :days (when changes days)
+            :thresholds limits
+            :cleanup (cleanup/candidates-of files (select-keys opts [:root :api-namespaces :api-paths]))})))
 
 (defn analyze-files
   "Analyze a collection of [path source] pairs and resolve coupling between them.
   opts can have :changes and :days for churn, :history for unusual changes,
   :root and :test-paths to say what is test code, and :api-namespaces and
   :api-paths, namespace names or globs and path globs of files whose public
-  functions are API and so never unused."
+  functions are API and so never unused, and :thresholds, limits to use in place
+  of metrics.thresholds/defaults."
   ([file-sources] (analyze-files file-sources nil))
   ([file-sources opts]
    (analyze-loaded (map (fn [[p s]] [p (constantly s)]) file-sources) opts)))

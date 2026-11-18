@@ -3,7 +3,7 @@
   numbers behind it."
   (:require [clojure.string :as str]
             [metrics.entropy :as entropy]
-            [metrics.queue :as queue]))
+            [metrics.thresholds :as thresholds]))
 
 (def default-top
   "How many queue entries to show; EDN output always has them all."
@@ -18,6 +18,12 @@
     :else (let [d (double x)
                 r (/ (Math/round (* 10.0 d)) 10.0)]
             (str r))))
+
+(defn limits-of
+  "The thresholds a result was judged by: its own, or the defaults for a result
+  made before it carried them."
+  [result]
+  (or (:thresholds result) thresholds/defaults))
 
 (defn- cell
   "Text for a table cell: a | would end the cell early, so it is escaped."
@@ -92,13 +98,18 @@
 
 ;; --- hotspots ------------------------------------------------------------
 
+(defn hotspots-intro
+  "What the hotspots section shows, said once for every format."
+  [limits days]
+  (str "Complex files that changed at least " (get-in limits [:hotspot :min-changes])
+       " times in the last " days " days."))
+
 (defn render-hotspots
   "The files both complex and changing, or nothing when there is no history."
-  [{:keys [changes days hotspots]}]
+  [{:keys [changes days hotspots] :as result}]
   (when changes
     (str "## Hotspots\n\n"
-         "Complex files that changed at least " queue/min-hotspot-changes
-         " times in the last " days " days.\n\n"
+         (hotspots-intro (limits-of result) days) "\n\n"
          (if (seq hotspots)
            (str "| File | Changes | Cyclomatic | Risk |\n|---|---|---|---|\n"
                 (apply str (for [{:keys [path changes complexity risk]} hotspots]
@@ -113,19 +124,20 @@
   [x]
   (str (when (pos? x) "+") (fmt x)))
 
-(def unusual-intro
+(defn unusual-intro
   "What the unusual changes section shows, said once for every format."
+  [limits]
   (str "Commits whose change to the code's information content, the entropy of "
-       "its words in bits, was more than " (fmt entropy/z-limit)
+       "its words in bits, was more than " (fmt (get-in limits [:unusual :z]))
        " standard deviations from the commits before them. Usually a feature "
        "landing, a removal or imported code: worth a closer review."))
 
 (defn render-unusual
   "The unusual changes, or nothing when there is no history."
-  [{:keys [unusual-changes]}]
+  [{:keys [unusual-changes] :as result}]
   (when-let [{:keys [commits changes]} unusual-changes]
     (str "## Unusual changes\n\n"
-         unusual-intro " Of the last " (plural commits "commit")
+         (unusual-intro (limits-of result)) " Of the last " (plural commits "commit")
          " that changed analyzed code, tests aside.\n\n"
          (if (seq changes)
            (str "| Commit | Date | Entropy change | z | Files | Subject |\n"
@@ -137,19 +149,20 @@
            "_none_\n")
          "\n")))
 
-(def unusual-files-intro
+(defn unusual-files-intro
   "What the unusual files section shows, said once for every format."
+  [limits]
   (str "Files whose words are unusually surprising for this project: the bits each "
        "word takes, on average, given the words of the other files, more than "
-       (fmt entropy/z-limit) " standard deviations above the files' mean. Often "
+       (fmt (get-in limits [:unusual :z])) " standard deviations above the files' mean. Often "
        "vendored, generated or example code, or a concern that belongs elsewhere. "
        "Tests aside, and files under " entropy/min-words " words."))
 
 (defn render-unusual-files
   "The files whose vocabulary stands out from the rest."
-  [{:keys [unusual-files]}]
+  [{:keys [unusual-files] :as result}]
   (str "## Unusual files\n\n"
-       unusual-files-intro "\n\n"
+       (unusual-files-intro (limits-of result)) "\n\n"
        (if (seq unusual-files)
          (str "| File | Surprisal (bits a word) | z | Words |\n|---|---|---|---|\n"
               (apply str (for [{:keys [path surprisal z words]} unusual-files]
@@ -218,7 +231,9 @@
        (str "| Total cognitive complexity | " (:cognitive summary) " |\n")
        (str "| Average maintainability index (comment-free) | " (fmt (:avg-maintainability summary)) " |\n")
        (str "| Average instability | " (fmt (:avg-instability summary)) " |\n")
-       (str "| Average entropy per file | " (fmt (:avg-entropy summary)) " |\n")))
+       (str "| Average entropy per file | " (fmt (:avg-entropy summary)) " |\n")
+       (str "| Average redundancy per file | " (fmt (:avg-redundancy summary)) " |\n")
+       (str "| Near-duplicate pairs | " (:duplicates summary) " |\n")))
 
 (defn render-files [files]
   (str "## Files\n\n"
@@ -254,25 +269,63 @@
          (apply str (for [[from to] (sort edges)] (str "- `" from "` -> `" to "`\n")))
          "_no internal dependencies_\n")))
 
+(defn threshold-rows
+  "[rule warning critical] for each limit the queue judges by, as text."
+  [limits]
+  (let [over (fn [label k]
+               (let [{:keys [warning critical]} (get limits k)]
+                 [label (str "> " (fmt warning)) (str "> " (fmt critical))]))
+        {mi-warning :warning mi-critical :critical} (:maintainability limits)
+        {:keys [warning critical min-changes]} (:hotspot limits)]
+    [(over "Cyclomatic complexity" :cyclomatic)
+     (over "Cognitive complexity" :cognitive)
+     (over "Nesting depth" :nesting)
+     (over "Function source lines" :lines)
+     (over "Function parameters" :params)
+     ["Maintainability index (comment-free)" (str "<= " (fmt mi-warning)) (str "< " (fmt mi-critical))]
+     (over "File source lines" :file-lines)
+     (over "File dependencies" :efferent)
+     [(str "Hotspot risk (at least " min-changes " changes)")
+      (str ">= " (fmt warning)) (str ">= " (fmt critical))]]))
+
 (defn render-thresholds
-  "What the queue's severities mean."
-  []
-  (let [row (fn [label [_ ok warning]]
-              (str "| " label " | > " ok " | > " warning " |\n"))
-        {:keys [cyclomatic cognitive nesting lines params]} queue/function-limits
-        {:keys [file-lines efferent]} queue/file-limits]
-    (str "## Thresholds\n\n"
-         "| Rule | Warning | Critical |\n|---|---|---|\n"
-         (row "Cyclomatic complexity" cyclomatic)
-         (row "Cognitive complexity" cognitive)
-         (row "Nesting depth" nesting)
-         (row "Function source lines" lines)
-         (row "Function parameters" params)
-         "| Maintainability index (comment-free) | <= 38 | < 10 |\n"
-         (row "File source lines" file-lines)
-         (row "File dependencies" efferent)
-         (str "| Hotspot risk | >= " (:warning queue/hotspot-limits)
-              " | >= " (:critical queue/hotspot-limits) " |\n"))))
+  "What the queue's severities mean, by the limits the result was judged by."
+  [result]
+  (str "## Thresholds\n\n"
+       "| Rule | Warning | Critical |\n|---|---|---|\n"
+       (apply str (for [[label w c] (threshold-rows (limits-of result))]
+                    (str "| " label " | " w " | " c " |\n")))))
+
+;; --- near-duplicates -------------------------------------------------------
+
+(defn duplicates-intro
+  "What the near-duplicates section shows, said once for every format."
+  [limits]
+  (str "Pairs of definitions that are near-copies: once locals are renamed and "
+       "strings blanked, compressing the two together takes little more than "
+       "compressing either alone. The distance is their normalized compression "
+       "distance, 0 for the same code; pairs at or under "
+       (get-in limits [:duplicates :max-distance])
+       " are listed, closest first. Extract what they share, or keep one. Tests "
+       "aside, and definitions under " (get-in limits [:duplicates :min-tokens]) " tokens."))
+
+(defn- place [{:keys [path name line end-line]}]
+  (str "`" name "` (" path ":" line "-" end-line ")"))
+
+(defn render-duplicates
+  "The near-duplicate pairs, the closest top of them."
+  [{:keys [duplicates] :as result} top]
+  (str "## Near-duplicates\n\n"
+       (duplicates-intro (limits-of result)) "\n\n"
+       (if (seq duplicates)
+         (str "| Distance | Definition | Near-copy |\n|---|---|---|\n"
+              (apply str (for [{:keys [distance a b]} (take top duplicates)]
+                           (str "| " (format "%.2f" (double distance))
+                                " | " (cell (place a)) " | " (cell (place b)) " |\n")))
+              (when (> (count duplicates) top)
+                (str "\n" (- (count duplicates) top) " more in the EDN and JSON output.\n")))
+         "_none_\n")
+       "\n"))
 
 (defn render
   "The full Markdown report for an analysis result."
@@ -287,9 +340,10 @@
         (render-hotspots result)
         (render-unusual result)
         (render-unusual-files result)
+        (render-duplicates result (or top default-top))
         (render-cleanup cleanup)
         (render-files files)
         "\n"
         (render-architecture files edges)
         "\n"
-        (render-thresholds))))
+        (render-thresholds result))))

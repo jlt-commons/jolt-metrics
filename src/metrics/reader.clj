@@ -211,6 +211,7 @@
    :column (:column (meta form) 0)
    :form form
    :params (reduce max 0 (map (comp param-count :params) arities))
+   :param-vectors (mapv :params arities)
    :body (vec (mapcat :body arities))})
 
 (defn- fn-form? [form]
@@ -694,7 +695,7 @@
   [f]
   (let [body (:body f)
         tokens (reduce halstead* {:operators [] :operands []} body)]
-    (assoc (select-keys f [:name :kind :line :column :params :private :helpers])
+    (assoc (select-keys f [:name :kind :line :column :params :param-vectors :body :private :helpers])
            :self-refs (get (symbol-counts [(:form f)]) (:name f) 0)
            :lloc (reduce + 0 (map form-count body))
            :decision-kinds (mapcat decision-kinds body)
