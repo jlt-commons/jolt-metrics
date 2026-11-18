@@ -162,10 +162,10 @@
 
 (defn- class-size
   "The node count of the cheapest form of id's class."
-  [{:keys [g ex sizes]} id]
+  [{:keys [g ex sizes] :as ctx} id]
   (let [id (eg/find g id)]
     (or (get @sizes id)
-        (let [n (term-size (eg/best-term g ex id))]
+        (let [n (reduce + 1 (map #(class-size ctx %) (subvec (second (get ex id)) 1)))]
           (swap! sizes assoc id n)
           n))))
 
@@ -179,33 +179,54 @@
 
 (defn- pattern-size
   "A pattern's concrete nodes: variables are free, and a node only a rewrite
-  made counts derived-weight."
+  made counts derived-weight.  A node built by anti-unification carries its
+  size; one renumbered or built otherwise is counted."
   [ctx p]
   (case (first p)
     (:hole :var) 0
     :class (class-size ctx (second p))
-    (reduce + (if (::derived (meta p)) derived-weight 1) (map #(pattern-size ctx %) (rest p)))))
+    (or (::size (meta p))
+        (reduce + (if (::derived (meta p)) derived-weight 1) (map #(pattern-size ctx %) (rest p))))))
 
-(defn- holes [p]
-  (if (#{:hole :var} (first p))
-    #{p}
-    (if (= :class (first p)) #{} (into #{} (mapcat holes) (rest p)))))
+(defn- holes
+  "A pattern's distinct variables, carried like its size."
+  [p]
+  (case (first p)
+    (:hole :var) #{p}
+    :class #{}
+    (or (::holes (meta p)) (into #{} (mapcat holes) (rest p)))))
+
+(defn- node-pattern
+  "A pattern node of op with no children yet, its size and variables to be
+  kept up as they are added."
+  [op derived?]
+  (with-meta [op] {::derived derived? ::size (if derived? derived-weight 1) ::holes #{}}))
+
+(defn- add-child
+  "A pattern node with one more child pattern."
+  [ctx node p]
+  (let [m (meta node)]
+    (with-meta (conj node p)
+      (assoc m
+             ::size (+ (::size m) (pattern-size ctx p))
+             ::holes (into (::holes m) (holes p))))))
 
 (defn- best
   "The beam most specific patterns: most concrete nodes, then fewest variables.
   Stable, so of equals the first found stays."
   [ctx ps]
   (->> (distinct ps)
-       (sort-by (fn [p] [(- (pattern-size ctx p)) (count (holes p))]))
+       (map (fn [p] [[(- (pattern-size ctx p)) (count (holes p))] p]))
+       (sort-by first)
        (take (:beam ctx))
-       vec))
+       (mapv second)))
 
 (declare au)
 
 (defn- ordered-nodes
-  "id's nodes, those from the source first."
+  "id's nodes, those from the source first, then by hash for a fixed order."
   [g id]
-  (sort-by (fn [n] [(if (eg/source-node? g id n) 0 1) (pr-str n)]) (eg/nodes g id)))
+  (sort-by (fn [n] [(if (eg/source-node? g id n) 0 1) (hash n)]) (eg/nodes g id)))
 
 (defn- au-pair
   "The patterns two e-nodes with the same operator share: the operator over each
@@ -215,8 +236,8 @@
   (let [derived? (not (and (eg/source-node? g a na) (eg/source-node? g b nb)))]
     (reduce (fn [combos [ka kb]]
               (let [ps (au ctx (dec depth) ka kb)]
-                (best ctx (for [c combos p ps] (conj c p)))))
-            [(with-meta [(first na)] (when derived? {::derived true}))]
+                (best ctx (for [c combos p ps] (add-child ctx c p)))))
+            [(node-pattern (first na) derived?)]
             (map vector (subvec na 1) (subvec nb 1)))))
 
 (defn- au-nodes
@@ -385,12 +406,13 @@
   "Pairs of classes worth anti-unifying: a class with itself when it occurs
   twice, and each class with its next window neighbours in its bucket."
   [{:keys [g] :as ctx} ids window]
-  (let [index (node-index g ids)]
+  (let [index (node-index g ids)
+        sketches (into {} (map (fn [id] [id (sketch ctx id 3)])) ids)]
     (distinct
      (concat
       (for [id ids :when (>= (eg/occurrences g id) 2)] [id id])
       (for [[_ bucket] index
-            :let [sorted (vec (sort-by #(sketch ctx % 3) bucket))]
+            :let [sorted (vec (sort-by sketches bucket))]
             i (range (count sorted))
             j (range (inc i) (min (count sorted) (+ i 1 window)))]
         [(sorted i) (sorted j)])))))
@@ -432,15 +454,13 @@
   "A pattern's form, size, arity and index key, or nil when it cannot be a
   function or is too small or takes too many parameters to be worth one."
   [{:keys [g opts] :as ctx} p]
-  (let [form (pattern-form ctx p)
-        size (pattern-size ctx p)
-        arity (count (remove (binders form) (variables form)))
+  (let [size (pattern-size ctx p)
         key (pattern-key g p)]
-    (when (and key
-               (not (malformed? form))
-               (>= size (:min-size opts))
-               (<= arity (:max-arity opts)))
-      {:pattern form :size size :arity arity :key key})))
+    (when (and key (>= size (:min-size opts)))
+      (let [form (pattern-form ctx p)
+            arity (count (remove (binders form) (variables form)))]
+        (when (and (not (malformed? form)) (<= arity (:max-arity opts)))
+          {:pattern form :size size :arity arity :key key})))))
 
 (defn- scored
   "A pattern with the classes it matches and the code each match takes up, or
@@ -499,6 +519,24 @@
                (spend g spent best)
                (remove #(identical? (:pattern %) (:pattern best)) pool))))))
 
+(def ^:private chunk-size
+  "Pairs per parallel task: enough that a task outweighs starting it."
+  256)
+
+(defn- in-parallel
+  "f over xs in chunks run in parallel, in order."
+  [f xs]
+  (apply concat (pmap #(doall (keep f %)) (partition-all chunk-size xs))))
+
+(defn- all-patterns
+  "The patterns of every pair, anti-unified in parallel.  The tasks share the
+  memo, which only ever gains entries any of them could have computed, so the
+  result does not depend on the order they run in."
+  [ctx pairs]
+  (apply concat
+         (pmap (fn [chunk] (doall (mapcat (fn [[a b]] (anti-unify* ctx a b)) chunk)))
+               (partition-all chunk-size pairs))))
+
 (defn- unit-graph
   "The e-graph of every unit's body, each form counted and noted as in its unit."
   [units min-size]
@@ -523,6 +561,5 @@
                           (>= (class-size ctx %) (:min-size opts)))
                     (eg/class-ids g))
         ctx (assoc ctx :index (node-index g (eg/class-ids g)) :opts opts)
-        patterns (distinct (map number-holes (mapcat (fn [[a b]] (anti-unify* ctx a b))
-                                                     (candidate-pairs ctx ids (:window opts)))))]
-    (select g units (keep #(scored ctx %) patterns) (:top opts))))
+        patterns (distinct (map number-holes (all-patterns ctx (candidate-pairs ctx ids (:window opts)))))]
+    (select g units (in-parallel #(scored ctx %) patterns) (:top opts))))

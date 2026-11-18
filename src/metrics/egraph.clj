@@ -204,33 +204,40 @@
   equally small forms extraction picks the one as written."
   0.25)
 
-(defn- node-cost [costs base node]
-  (reduce (fn [acc kid]
-            (if-let [c (get costs kid)] (+ acc c) (reduced nil)))
-          base (subvec node 1)))
-
-(defn- relax
-  "best with id's entry lowered to its cheapest node under costs, if that is
-  cheaper than what best has."
-  [costs best id {:keys [nodes source]}]
-  (reduce (fn [best node]
-            (let [c (node-cost costs (if (contains? source node) 1.0 (+ 1.0 derived-cost)) node)]
-              (if (and c (< c (first (get best id [##Inf]))))
-                (assoc best id [c node])
-                best)))
-          best (sort-by pr-str nodes)))
+(defn- cheaper?
+  "Is [c node] a better choice than the entry best?  Ties go to the smaller
+  hash, so the choice does not depend on the order nodes are seen in."
+  [c node best]
+  (or (nil? best)
+      (< c (first best))
+      (and (== c (first best)) (< (hash node) (hash (second best))))))
 
 (defn extraction
   "The cheapest e-node of every class, counting one per node and a little more
-  for a derived one: {id [cost node]}.
-  Found by relaxing until nothing improves, so a cycle costs nothing extra."
+  for a derived one: {id [cost node]}.  One depth-first pass, each class costed
+  once; a node that leads back into a class still being costed is passed over,
+  so a cycle never makes a term infinite."
   [g]
-  (loop [best {} passes 0]
-    (let [costs (into {} (map (fn [[id [c _]]] [id c])) best)
-          best' (reduce-kv #(relax costs %1 %2 %3) best (:classes g))]
-      (if (or (= best best') (> passes 200))
-        best'
-        (recur best' (inc passes))))))
+  (let [best (volatile! {})
+        visit (fn visit [id path]
+                (let [id (find g id)]
+                  (or (get @best id)
+                      (when-not (contains? path id)
+                        (let [{:keys [nodes source]} (get-in g [:classes id])
+                              path (conj path id)
+                              cost-of (fn [node]
+                                        (reduce (fn [acc kid]
+                                                  (if-let [[c] (visit kid path)] (+ acc c) (reduced nil)))
+                                                (if (contains? source node) 1.0 (+ 1.0 derived-cost))
+                                                (subvec node 1)))
+                              choice (reduce (fn [b node]
+                                               (let [c (cost-of node)]
+                                                 (if (and c (cheaper? c node b)) [c node] b)))
+                                             nil nodes)]
+                          (when choice (vswap! best assoc id choice))
+                          choice)))))]
+    (doseq [id (class-ids g)] (visit id #{}))
+    @best))
 
 (defn best-term
   "The cheapest term id's class holds, as [op child-term ...]; with an
