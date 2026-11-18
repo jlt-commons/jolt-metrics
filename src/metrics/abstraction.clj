@@ -254,16 +254,18 @@
 
 (defn- au
   "The patterns classes a and b share, the variable [:hole a b] always among
-  them.  A class with no locals that is shared outright stays concrete."
+  them.  A class with no locals that is shared outright stays concrete.  The
+  memo is keyed by depth too: a pair met with little depth left is cut short,
+  and that must not stand for the pair met with more."
   [{:keys [g memo] :as ctx} depth a b]
   (let [a (eg/find g a) b (eg/find g b)]
     (if (and (= a b) (not (eg/local? g a)))
       [(cls a)]
-      (or (get @memo [a b])
+      (or (get @memo [a b depth])
           (let [r (if (pos? depth)
                     (best ctx (conj (au-nodes ctx depth a b) [:hole a b]))
                     [[:hole a b]])]
-            (swap! memo assoc [a b] r)
+            (swap! memo assoc [a b depth] r)
             r)))))
 
 (defn- context [g opts]

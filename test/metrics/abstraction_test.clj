@@ -107,3 +107,18 @@
         found (ab/opportunities units {:min-size 4})]
     (is (not-any? #(and (seq? (:pattern %)) (= 'let (first (:pattern %))) (symbol? (second (:pattern %))))
                   found))))
+
+(deftest a-pair-gives-the-same-patterns-whatever-came-before
+  ;; the memo is shared by every pair, run in parallel: a pair first met deep
+  ;; inside another, with little depth left, must not cut it short later
+  (let [enc #(ab/encode #{} %)
+        [g a] (eg/add-term eg/empty-graph (enc '(w (f (g (h (i 1)))))))
+        [g b] (eg/add-term g (enc '(w (f (g (h (i 2)))))))
+        [g x] (eg/add-term g (enc '(f (g (h (i 1))))))
+        [g y] (eg/add-term g (enc '(f (g (h (i 2))))))
+        context #'ab/context
+        au #'ab/anti-unify*
+        fresh (au (context g {:depth 3}) x y)
+        ctx (context g {:depth 3})
+        _ (au ctx a b)]
+    (is (= (map #(ab/render g %) fresh) (map #(ab/render g %) (au ctx x y))))))
