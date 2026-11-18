@@ -86,3 +86,11 @@
         off (read-string (:out (cli/run ["src" "--format" "edn" "--no-git" "--no-abstractions"])))]
     (is (vector? (:abstractions on)))
     (is (nil? (:abstractions off)))))
+
+(deftest markdown-keeps-a-backtick-inside-the-pattern
+  ;; a backtick in a string would end a one-backtick code span early
+  (let [md (report/render-abstractions
+            {:abstractions [{:pattern '(fmt ?a "`x`") :size 9 :arity 1 :uses 3 :saving 5
+                             :sites [{:path "a.clj" :name "f" :line 1}]}]}
+            25)]
+    (is (str/includes? md "| ``(fmt ?a \"`x`\")`` |"))))
