@@ -55,3 +55,21 @@
         [g small] (eg/add-term g (leaf "z"))
         g (eg/rebuild (eg/union g big small))]
     (is (= [[:sym "z"]] (eg/best-term g big)))))
+
+(defn- links
+  "How many links find walks from id."
+  [g id]
+  (loop [id id n 0]
+    (let [p (get-in g [:parent id])]
+      (if (= p id) n (recur p (inc n))))))
+
+(deftest find-walks-at-most-log-n-links
+  ;; x has many parents but is one id; it goes under the set of two, not over it
+  (let [[g a] (eg/add-term eg/empty-graph (leaf "a"))
+        [g b] (eg/add-term g (leaf "b"))
+        [g x] (eg/add-term g (leaf "x"))
+        g (reduce (fn [g f] (first (eg/add-term g [[:list 2] (leaf f) [:class x]])))
+                  g ["f" "g" "h" "i"])
+        g (eg/rebuild (eg/union g a b))
+        g (eg/rebuild (eg/union g a x))]
+    (is (<= (apply max (map #(links g %) [a b x])) 1))))

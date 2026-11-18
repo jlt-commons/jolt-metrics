@@ -18,8 +18,9 @@
   written two ways), whether it mentions a local, and which definitions it
   occurs in.
 
-  The graph is a persistent value.  Union is by size, so find walks a path of
-  at most log n links without compressing it.
+  The graph is a persistent value.  Union is by size, the number of ids a class
+  has merged, so find walks a path of at most log n links without compressing
+  it.
 
   A term is [op child ...], op a vector label such as [:list 3] or [:sym \"inc\"],
   or [:class id] for an existing class.  Terms from the source go in through
@@ -95,7 +96,7 @@
              (assoc :next (inc id))
              (assoc-in [:parent id] id)
              (assoc-in [:memo node] id)
-             (assoc-in [:classes id] {:nodes #{node} :parents [] :occ 0 :source #{}
+             (assoc-in [:classes id] {:nodes #{node} :parents [] :occ 0 :source #{} :size 1
                                       :local? (node-local? g node) :units []}))
          id]))))
 
@@ -138,6 +139,7 @@
   "One class holding two: the analysis joined, occurrences summed."
   [r o]
   {:nodes (into (:nodes r) (:nodes o))
+   :size (+ (:size r) (:size o))
    :parents (into (:parents r) (:parents o))
    :occ (+ (:occ r) (:occ o))
    :local? (or (:local? r) (:local? o))
@@ -152,9 +154,7 @@
     (if (= a b)
       g
       (let [ca (get-in g [:classes a]) cb (get-in g [:classes b])
-            [root other] (if (>= (+ (count (:nodes ca)) (count (:parents ca)))
-                                 (+ (count (:nodes cb)) (count (:parents cb))))
-                           [a b] [b a])
+            [root other] (if (>= (:size ca) (:size cb)) [a b] [b a])
             merged (merge-classes (get-in g [:classes root]) (get-in g [:classes other]))]
         (-> g
             (assoc-in [:parent other] root)
