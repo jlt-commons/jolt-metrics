@@ -6,9 +6,6 @@ and coupling, and finds unusual commits, files whose vocabulary doesn't fit the
 project, and near-copies of definitions. The report opens with a ranked
 refactoring queue: what to clean up first, and why.
 
-Each metric is checked against a [writ](https://github.com/jlt-commons/writ)
-spec that states its contract, as well as by unit tests.
-
 ## Metrics
 
 | Metric | Source | What it measures |
@@ -30,7 +27,7 @@ spec that states its contract, as well as by unit tests.
 
 ## Usage
 
-Run the standalone `jolt-metrics` binary, which needs no jolt install, or
+Run the standalone `jolt-metrics` binary, or
 `jolt -m metrics.cli`. Both take the same arguments. Churn, hotspots and unusual
 changes need `git` on the PATH.
 
