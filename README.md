@@ -32,28 +32,67 @@ stated contract, not just unit tests.
 
 ## Usage
 
-### Install
+There are two ways to run it, with the same arguments and options: the
+standalone `jolt-metrics` binary, which needs no jolt install, or
+`jolt -m metrics.cli` with jolt. Churn, hotspots and unusual changes need `git`
+on the PATH either way.
+
+### The standalone binary
 
 Each [release](https://github.com/jlt-commons/jolt-metrics/releases) has a
-standalone binary for macOS (arm64), Linux (x86_64) and Windows (x86_64). Unpack
-the archive and put `jolt-metrics` on your PATH; it needs no jolt install, and
-`jolt-metrics <dir>` takes the same options as `jolt -m metrics.cli <dir>`
-below. The macOS binary is unsigned, so clear the quarantine flag once:
-`xattr -d com.apple.quarantine jolt-metrics`. Churn, hotspots and unusual
-changes need `git` on the PATH.
+binary for macOS (arm64), Linux (x86_64) and Windows (x86_64). Unpack the
+archive and put `jolt-metrics` on your PATH:
 
-To build one yourself: `jolt build -m metrics.cli -o jolt-metrics`.
+```console
+tar xzf jolt-metrics-v0.6.0-aarch64-macos.tar.gz
+cp jolt-metrics-v0.6.0-aarch64-macos/jolt-metrics ~/.local/bin/
+xattr -d com.apple.quarantine ~/.local/bin/jolt-metrics   # macOS only: the binary is unsigned
+```
 
-### CLI
+```console
+jolt-metrics src                # print the Markdown report
+jolt-metrics src report.md      # write it to a file
+jolt-metrics src report.html    # one page to share; the extension picks the format
+jolt-metrics src --format json  # the lean report, for tools and LLMs
+jolt-metrics src --format edn   # the full result, as data
+jolt-metrics --help
+```
+
+To build the binary yourself from a checkout: `jolt build -m metrics.cli -o jolt-metrics`.
+
+### With jolt
+
+From a checkout of this repository, `jolt -m metrics.cli` takes the place of
+`jolt-metrics`:
 
 ```console
 jolt -m metrics.cli src                # print the Markdown report
-jolt -m metrics.cli src report.md      # write it to a file
-jolt -m metrics.cli src report.html    # one page to share; the extension picks the format
-jolt -m metrics.cli src --format json  # the lean report, for tools and LLMs
-jolt -m metrics.cli src --format edn   # the full result, as data
+jolt -m metrics.cli src report.html    # write the HTML page
 jolt -m metrics.cli --help
 ```
+
+From any other directory, pull it in as a git dependency for one run:
+
+```console
+jolt -Sdeps '{:deps {io.github.jlt-commons/jolt-metrics {:git/url "https://github.com/jlt-commons/jolt-metrics" :git/tag "v0.6.0" :git/sha "0ea0230"}}}' \
+  -m metrics.cli src
+```
+
+or give a project an alias for it in its `deps.edn`:
+
+```clojure
+{:aliases
+ {:metrics {:extra-deps {io.github.jlt-commons/jolt-metrics
+                         {:git/url "https://github.com/jlt-commons/jolt-metrics"
+                          :git/tag "v0.6.0" :git/sha "0ea0230"}}
+            :main-opts ["-m" "metrics.cli"]}}}
+```
+
+```console
+jolt -M:metrics src report.html
+```
+
+### Options
 
 | Option | Default | Meaning |
 |---|---|---|
