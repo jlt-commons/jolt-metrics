@@ -1,7 +1,8 @@
 (ns metrics.abstraction-test
   "Behaviour tests for abstraction search: encoding forms as terms, saturating
   with the sugar rules, anti-unifying e-classes and scoring what is found."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.edn]
+            [clojure.test :refer [deftest is testing]]
             [metrics.abstraction :as ab]
             [metrics.egraph :as eg]))
 
@@ -107,3 +108,67 @@
         found (ab/opportunities units {:min-size 4})]
     (is (not-any? #(and (seq? (:pattern %)) (= 'let (first (:pattern %))) (symbol? (second (:pattern %))))
                   found))))
+
+(deftest a-pair-gives-the-same-patterns-whatever-came-before
+  ;; the memo is shared by every pair, run in parallel: a pair first met deep
+  ;; inside another, with little depth left, must not cut it short later
+  (let [enc #(ab/encode #{} %)
+        [g a] (eg/add-term eg/empty-graph (enc '(w (f (g (h (i 1)))))))
+        [g b] (eg/add-term g (enc '(w (f (g (h (i 2)))))))
+        [g x] (eg/add-term g (enc '(f (g (h (i 1))))))
+        [g y] (eg/add-term g (enc '(f (g (h (i 2))))))
+        context #'ab/context
+        au #'ab/anti-unify*
+        fresh (au (context g {:depth 3}) x y)
+        ctx (context g {:depth 3})
+        _ (au ctx a b)]
+    (is (= (map #(ab/render g %) fresh) (map #(ab/render g %) (au ctx x y))))))
+
+(deftest every-use-is-a-site
+  ;; c's if-not is smaller as written than the pattern it matches through its
+  ;; expansion, so it must not be too small to note where it occurs
+  (let [units [(unit "a" '[x] '(if (not (p x 2)) (a 1 2) (b 2 3)))
+               (unit "b" '[y] '(if (not (p y 2)) (a 1 2) (b 2 3)))
+               (unit "c" '[z] '(if-not (p z 2) (a 1 2) (b 2 3)))]
+        found (ab/opportunities units {:min-size 15})]
+    (is (seq found))
+    (doseq [o found]
+      (is (= (:uses o) (count (:sites o))) (pr-str o)))))
+
+(deftest a-match-takes-up-the-code-its-bindings-agree-on
+  ;; x = (f a (h b)) = (f a (h a)); (f ?a (h ?a)) matches only through the
+  ;; second, so a use of it takes up (h a), never (h b)
+  (let [enc #(ab/encode #{} %)
+        [g x] (eg/add-term eg/empty-graph (enc '(f a (h b))))
+        [g y] (eg/add-term g (enc '(f a (h a))))
+        [g hb] (eg/add-term g (enc '(h b)))
+        [g ha] (eg/add-term g (enc '(h a)))
+        g (eg/rebuild (eg/union g x y))
+        sym (fn [s] (some #(when (= #{[[:sym s]]} (eg/nodes g %)) %) (eg/class-ids g)))
+        p [[:list 3] [:class (sym "f")] [:var 0] [[:list 2] [:class (sym "h")] [:var 0]]]
+        ctx (assoc (#'ab/context g {}) :opts ab/defaults)
+        taken (set (#'ab/consumed ctx p x))]
+    (is (contains? taken (eg/find g ha)))
+    (is (not (contains? taken (eg/find g hb))))))
+
+(deftest sites-are-the-uses-still-left
+  ;; the inner shape is taken up inside the outer one in a, b and c, so what
+  ;; is left of it is in d and e alone
+  (let [inner '(inner :k 1 2 3 4 5 6)
+        outer (list 'outer 1 2 3 4 5 6 7 inner)
+        units (concat (for [n ["a" "b" "c"]] (unit n '[] outer))
+                      (for [n ["d" "e"]] (unit n '[] inner)))
+        found (ab/opportunities units {:min-size 6})
+        o (first (filter #(= inner (:pattern %)) found))]
+    (is (some? o))
+    (is (= 2 (:uses o)))
+    (is (= #{"d" "e"} (set (map :name (:sites o)))))))
+
+(deftest a-regex-in-a-pattern-reads-back-as-edn
+  ;; edn has no regex literal, and the EDN report prints patterns as they are
+  (let [units (for [[n x] [["a" 'x] ["b" 'y] ["c" 'z]]]
+                (unit n [x] (list 'some (list 'partial 're-find #"^/(\d+)") (list 'paths x :all))))
+        top (first (ab/opportunities units {:min-size 6}))]
+    (is (some? top))
+    (is (= (:pattern top) (clojure.edn/read-string (pr-str (:pattern top)))))
+    (is (some #{'(re-pattern "^/(\\d+)")} (tree-seq coll? seq (:pattern top))))))

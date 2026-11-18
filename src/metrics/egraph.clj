@@ -18,8 +18,9 @@
   written two ways), whether it mentions a local, and which definitions it
   occurs in.
 
-  The graph is a persistent value.  Union is by size, so find walks a path of
-  at most log n links without compressing it.
+  The graph is a persistent value.  Union is by size, the number of ids a class
+  has merged, so find walks a path of at most log n links without compressing
+  it.
 
   A term is [op child ...], op a vector label such as [:list 3] or [:sym \"inc\"],
   or [:class id] for an existing class.  Terms from the source go in through
@@ -30,8 +31,9 @@
 
 (def empty-graph
   "An e-graph with nothing in it.  Classes record the definitions they occur in
-  only when their term has at least :unit-min nodes, so leaves stay cheap."
-  {:parent {} :memo {} :classes {} :pending [] :next 0 :unit-min 4})
+  only for compound terms, so leaves stay cheap.  Not by size: a rewrite can make
+  a small term equal to a larger one, and every occurrence of the class counts."
+  {:parent {} :memo {} :classes {} :pending [] :next 0})
 
 (defn find
   "The canonical id of id's class."
@@ -94,7 +96,7 @@
              (assoc :next (inc id))
              (assoc-in [:parent id] id)
              (assoc-in [:memo node] id)
-             (assoc-in [:classes id] {:nodes #{node} :parents [] :occ 0 :source #{}
+             (assoc-in [:classes id] {:nodes #{node} :parents [] :occ 0 :source #{} :size 1
                                       :local? (node-local? g node) :units []}))
          id]))))
 
@@ -118,7 +120,7 @@
                                 (rest term))
           node (into [(first term)] kids)
           [g id] (add-node g node)]
-      [(if counted? (count-occurrence g id node (when (>= size (:unit-min g)) unit)) g)
+      [(if counted? (count-occurrence g id node (when (> size 1) unit)) g)
        id size])))
 
 (defn add-term
@@ -137,6 +139,7 @@
   "One class holding two: the analysis joined, occurrences summed."
   [r o]
   {:nodes (into (:nodes r) (:nodes o))
+   :size (+ (:size r) (:size o))
    :parents (into (:parents r) (:parents o))
    :occ (+ (:occ r) (:occ o))
    :local? (or (:local? r) (:local? o))
@@ -151,9 +154,7 @@
     (if (= a b)
       g
       (let [ca (get-in g [:classes a]) cb (get-in g [:classes b])
-            [root other] (if (>= (+ (count (:nodes ca)) (count (:parents ca)))
-                                 (+ (count (:nodes cb)) (count (:parents cb))))
-                           [a b] [b a])
+            [root other] (if (>= (:size ca) (:size cb)) [a b] [b a])
             merged (merge-classes (get-in g [:classes root]) (get-in g [:classes other]))]
         (-> g
             (assoc-in [:parent other] root)
@@ -161,9 +162,25 @@
             (assoc-in [:classes root] merged)
             (update :pending conj root))))))
 
+(defn- spread-local
+  "g with the parents of id's class marked as mentioning a local when it does.
+  A parent that changes is queued, so the mark reaches its parents in turn."
+  [g id]
+  (if (local? g id)
+    (reduce (fn [g [_ pid]]
+              (let [pid (find g pid)]
+                (if (local? g pid)
+                  g
+                  (-> g
+                      (assoc-in [:classes pid :local?] true)
+                      (update :pending conj pid)))))
+            g (get-in g [:classes (find g id) :parents]))
+    g))
+
 (defn- repair
   "g with the parents of id's class re-canonicalized: stale hashcons entries
-  replaced, and parents that are now the same e-node merged."
+  replaced, parents that are now the same e-node merged, and a local the union
+  brought in passed up to them."
   [g id]
   (let [id (find g id)
         parents (get-in g [:classes id :parents])
@@ -178,7 +195,7 @@
                              [g (assoc seen node (find g pid))]))
                          [g {}] parents)
         id (find g id)]
-    (assoc-in g [:classes id :parents] (vec seen))))
+    (spread-local (assoc-in g [:classes id :parents] (vec seen)) id)))
 
 (defn- canonical-nodes
   "g with every class's nodes canonical and deduplicated."

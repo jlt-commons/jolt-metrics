@@ -25,6 +25,16 @@
   [result]
   (or (:thresholds result) thresholds/defaults))
 
+(defn- code
+  "s as inline code: fenced by one more backtick than its longest run of them,
+  padded with a space when it starts or ends with one, so no backtick in it
+  ends the span early."
+  [s]
+  (let [s (str s)
+        fence (apply str (repeat (inc (reduce max 0 (map count (re-seq #"`+" s)))) "`"))
+        pad (if (or (str/starts-with? s "`") (str/ends-with? s "`")) " " "")]
+    (str fence pad s pad fence)))
+
 (defn- cell
   "Text for a table cell: a | would end the cell early, so it is escaped."
   [s]
@@ -179,7 +189,7 @@
          (str "\nand " (- (count lines) default-top) " more; use `--format edn` for all.\n"))))
 
 (defn- require-line [{:keys [path lib alias refers]}]
-  (str "- `" path "`: `" lib "`"
+  (str "- " (code path) ": `" lib "`"
        (when alias (str " (alias `" alias "`)"))
        (when refers (str " (refers " (apply str (interpose ", " (map #(str "`" % "`") refers))) ")"))
        "\n"))
@@ -362,7 +372,7 @@
          (str "| Saves | Uses | Params | Pattern | Where |\n|---|---|---|---|---|\n"
               (apply str (for [{:keys [saving uses arity pattern sites]} (take top abstractions)]
                            (str "| " saving " | " uses " | " arity
-                                " | " (cell (str "`" (pr-str pattern) "`"))
+                                " | " (cell (code (pr-str pattern)))
                                 " | " (cell (sites-text sites)) " |\n")))
               (when (> (count abstractions) top)
                 (str "\n" (- (count abstractions) top) " more in the EDN and JSON output.\n"))))
