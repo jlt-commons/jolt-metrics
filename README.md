@@ -39,8 +39,8 @@ binaries for macOS (arm64), Linux (x86_64) and Windows (x86_64). Unpack one and
 put `jolt-metrics` on your PATH:
 
 ```console
-tar xzf jolt-metrics-v0.7.0-aarch64-macos.tar.gz
-cp jolt-metrics-v0.7.0-aarch64-macos/jolt-metrics ~/.local/bin/
+tar xzf jolt-metrics-v0.7.1-aarch64-macos.tar.gz
+cp jolt-metrics-v0.7.1-aarch64-macos/jolt-metrics ~/.local/bin/
 xattr -d com.apple.quarantine ~/.local/bin/jolt-metrics   # macOS only: the binary is unsigned
 ```
 
@@ -69,7 +69,7 @@ jolt -m metrics.cli --help
 Anywhere else, pull it in as a git dependency for one run:
 
 ```console
-jolt -Sdeps '{:deps {io.github.jlt-commons/jolt-metrics {:git/url "https://github.com/jlt-commons/jolt-metrics" :git/tag "v0.7.0" :git/sha "e846d25"}}}' \
+jolt -Sdeps '{:deps {io.github.jlt-commons/jolt-metrics {:git/url "https://github.com/jlt-commons/jolt-metrics" :git/tag "v0.7.1" :git/sha "d134ab1"}}}' \
   -m metrics.cli src
 ```
 
@@ -79,7 +79,7 @@ or add an alias to a project's `deps.edn`:
 {:aliases
  {:metrics {:extra-deps {io.github.jlt-commons/jolt-metrics
                          {:git/url "https://github.com/jlt-commons/jolt-metrics"
-                          :git/tag "v0.7.0" :git/sha "e846d25"}}
+                          :git/tag "v0.7.1" :git/sha "d134ab1"}}
             :main-opts ["-m" "metrics.cli"]}}}
 ```
 
