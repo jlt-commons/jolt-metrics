@@ -4,7 +4,8 @@
   (:require [clojure.edn]
             [clojure.test :refer [deftest is testing]]
             [metrics.abstraction :as ab]
-            [metrics.egraph :as eg]))
+            [metrics.egraph :as eg]
+            [metrics.scheme.reader :as scheme]))
 
 (defn- unit [n params & forms]
   {:path "a.clj" :name n :line 1 :param-vectors [params] :body (vec forms)})
@@ -172,3 +173,18 @@
     (is (some? top))
     (is (= (:pattern top) (clojure.edn/read-string (pr-str (:pattern top)))))
     (is (some #{'(re-pattern "^/(\\d+)")} (tree-seq coll? seq (:pattern top))))))
+
+(deftest a-scheme-atom-in-a-pattern-reads-back-as-edn
+  ;; the Scheme reader keeps characters and numbers as symbols: 0 is fine edn,
+  ;; but #\\L and #x1F are not
+  (let [units (for [[n x] [["a" 's] ["b" 't] ["c" 'u]]]
+                (unit n [x] (first (scheme/read-forms
+                                    (str "(memv (string-ref " x " #x1F 0) '(#\\L #\\[ #\\space))")))))
+        top (first (ab/opportunities units {:min-size 6}))
+        text (pr-str (:pattern top))]
+    (is (some? top))
+    (is (= text (pr-str (clojure.edn/read-string text))))
+    (is (some #{(symbol "0")} (tree-seq coll? seq (:pattern top))))
+    (is (= #{'(symbol "#\\L") '(symbol "#\\[") '(symbol "#\\space") '(symbol "#x1F")}
+           (set (filter #(and (seq? %) (= 'symbol (first %)))
+                        (tree-seq coll? seq (:pattern top))))))))
