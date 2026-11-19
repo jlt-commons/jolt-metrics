@@ -301,6 +301,15 @@
 (defn- var-symbol [i]
   (symbol (str "?" (if (< i 26) (char (+ 97 i)) (str "v" i)))))
 
+(defn- edn-symbol
+  "The symbol named s, or, when its name is not edn that prints back as itself,
+  the call that makes it.  The Scheme reader keeps characters and numbers as
+  symbols: 0 reads fine, but #\\L and #x1F are no edn."
+  [s]
+  (if (= s (try (pr-str (edn/read-string s)) (catch Throwable _ nil)))
+    (symbol s)
+    (list 'symbol s)))
+
 (defn- form-of
   "The Clojure form of a term or pattern node, its children already forms."
   [[kind x] kids]
@@ -309,7 +318,7 @@
     :vec (vec kids)
     :map (apply array-map kids)
     :set (set kids)
-    (:sym :local) (symbol x)
+    (:sym :local) (edn-symbol x)
     :str x
     ;; edn has no regex literal: the call that makes one reads back
     :re (list 're-pattern x)
