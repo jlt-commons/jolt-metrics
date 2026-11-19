@@ -21,6 +21,7 @@
             [metrics.tokens :as tokens]
             [metrics.thresholds :as thresholds]
             [metrics.callgraph :as callgraph]
+            [metrics.lint :as lint]
             [jolt.fs :as fs]))
 
 (defn- average
@@ -167,7 +168,8 @@
      {:loc locs
       :functions (mapv #(dissoc % :halstead) fns)
       :halstead file-h
-      :index-analysis (when-let [index (:index lang)] (index path source))}
+      :index-analysis (when-let [index (:index lang)] (index path source))
+      :lints (when-let [lint-forms (:lint lang)] (lint-forms forms))}
      (file-scores model fns)
      (index-fields (file-index fns (:volume file-h) locs)))))
 
@@ -265,7 +267,7 @@
   [file]
   (-> file
       (dissoc :symbols :qualifiers :libspecs :unused-public? :load-paths :word-counts
-              :index-analysis)
+              :index-analysis :lints)
       (update :functions (fn [fns] (mapv #(dissoc % :self-refs :tokens :param-vectors :body) fns)))))
 
 (defn- near-duplicates
@@ -369,12 +371,20 @@
    :abstractions (when-not skip-abstractions? (abstractions limits files))})
 
 (defn- result-summary
-  "The project rollups, with how many near-duplicates and abstraction
-  opportunities were found; nil for the second when it was skipped."
+  "The project rollups, with how many near-duplicates, abstraction opportunities
+  and lint findings were found; nil for abstractions when they were skipped."
   [files errors findings]
   (assoc (summarize files (count errors))
          :duplicates (count (:duplicates findings))
-         :abstractions (some-> (:abstractions findings) count)))
+         :abstractions (some-> (:abstractions findings) count)
+         :lints (count (:lints findings))))
+
+(defn- project-lints
+  "Every file's lint findings at the levels :linters gives them, by path and line."
+  [files linters]
+  (vec (for [f (sort-by :path files)
+             finding (lint/with-levels (:lints f) linters)]
+         (assoc finding :path (:path f)))))
 
 (defn- queued
   "The work the limits find: the hotspots, and the refactoring queue."
@@ -397,7 +407,8 @@
                 (annotated-files files edges changes #(mark-test-file % root test-paths))))
         limits (thresholds/with-defaults (:thresholds opts))
         result-files (mapv public-file files)
-        findings (information-findings limits files history (false? (:abstractions opts)))]
+        findings (assoc (information-findings limits files history (false? (:abstractions opts)))
+                        :lints (project-lints files (:linters opts)))]
     (merge findings (queued limits files)
            {:files result-files
             :errors errors
@@ -415,7 +426,8 @@
   :api-paths, namespace names or globs and path globs of files whose public
   functions are API and so never unused, and :thresholds, limits to use in place
   of metrics.thresholds/defaults.  :abstractions false skips the search for
-  abstraction opportunities, the slowest pass."
+  abstraction opportunities, the slowest pass.  :linters sets the level of each
+  lint rule, as metrics.lint/with-levels takes it."
   ([file-sources] (analyze-files file-sources nil))
   ([file-sources opts]
    (analyze-loaded (map (fn [[p s]] [p (constantly s)]) file-sources) opts)))

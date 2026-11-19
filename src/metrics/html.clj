@@ -91,7 +91,8 @@
      ["Average entropy per file" (:avg-entropy summary)]
      ["Average redundancy per file" (:avg-redundancy summary)]
      ["Near-duplicate pairs" (:duplicates summary)]
-     ["Abstraction opportunities" (:abstractions summary)]]))
+     ["Abstraction opportunities" (:abstractions summary)]
+     ["Lint findings" (:lints summary 0)]]))
 
 (defn- summary-section [summary entries]
   (section "summary" "Summary"
@@ -238,6 +239,19 @@
                    (cleanup-part "Unreferenced public functions" (map function-item unused-public)))
              [:p [:em "none"]])))
 
+;; --- lint findings ---------------------------------------------------------
+
+(defn- lint-item [{:keys [path line rule level message]}]
+  [:li [:code (str path ":" line)] " " (name level) " " [:code (name rule)] ": " message])
+
+(defn- lints-section [lints]
+  (section "lints" "Lint findings"
+           (if (seq lints)
+             (list [:p (report/lints-intro)]
+                   [:ul (take report/default-top (map lint-item lints))]
+                   (more-line report/default-top (count lints)))
+             [:p [:em "none"]])))
+
 ;; --- the numbers -----------------------------------------------------------
 
 (defn- file-cells [f]
@@ -306,7 +320,7 @@
 
 (defn- sections
   "The report's sections, in the Markdown report's order."
-  [{:keys [files summary edges errors queue cleanup] :as result} top]
+  [{:keys [files summary edges errors queue cleanup lints] :as result} top]
   [(summary-section summary queue)
    (errors-section errors)
    (queue-section queue top)
@@ -316,6 +330,7 @@
    (duplicates-section result top)
    (abstractions-section result top)
    (cleanup-section cleanup)
+   (lints-section lints)
    (files-section files)
    (architecture-section files edges)
    (thresholds-section result)])

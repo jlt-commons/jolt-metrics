@@ -8,3 +8,7 @@
   (let [{:keys [queue errors]} (core/analyze-dir "src")]
     (is (empty? errors))
     (is (empty? (map (juxt :name :path :line) queue)))))
+
+(deftest our-own-source-is-lint-clean
+  (let [{:keys [lints]} (core/analyze-dir "src" {:abstractions false})]
+    (is (empty? (map (juxt :path :line :rule) lints)))))

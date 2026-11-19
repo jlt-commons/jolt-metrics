@@ -120,6 +120,7 @@ Prints the report, or writes it to out.
               :api-namespaces (:api-namespaces project-config)
               :api-paths (:api-paths project-config)
               :thresholds (:thresholds project-config)
+              :linters (:linters project-config)
               :abstractions abstractions}]
     (core/analyze-dir dir (assoc opts
                                  :changes (when git (git/changes dir days))

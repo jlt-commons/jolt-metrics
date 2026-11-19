@@ -214,6 +214,26 @@
               (cleanup-part "Unreferenced public functions" (map function-line unused-public)))
          "_none_\n\n")))
 
+;; --- lint findings -------------------------------------------------------
+
+(defn lints-intro
+  "What the lint findings section shows, said once for every format."
+  []
+  (str "Idioms that have a simpler form, and likely bugs, after clj-kondo's rules. "
+       "Set a rule's level, or turn it off, with :linters in .jolt-metrics.edn; "
+       "put #_:jolt-metrics/ignore before a form to leave it out."))
+
+(defn- lint-line [{:keys [path line rule level message]}]
+  (str "- " (code (str path ":" line)) " " (name level) " " (code (name rule)) ": " message "\n"))
+
+(defn render-lints
+  "The lint findings, in source order."
+  [lints]
+  (str "## Lint findings\n\n"
+       (if (seq lints)
+         (str (lints-intro) "\n\n" (capped-lines (map lint-line lints)) "\n")
+         "_none_\n\n")))
+
 ;; --- the numbers ---------------------------------------------------------
 
 (defn render-errors
@@ -225,26 +245,33 @@
                       (str "- `" path "`: " error "\n")))
          "\n")))
 
+(def ^:private summary-rows
+  "Each summary row's label, and how to get its value from the summary."
+  [["Files" :files]
+   ["Files not analyzed" :unreadable]
+   ["Lines of code" :loc]
+   ["Source lines" :sloc]
+   ["Comment lines" :cloc]
+   ["Functions" :functions]
+   ["Total cyclomatic complexity" :cyclomatic]
+   ["Average cyclomatic complexity per function" (comp fmt :avg-cyclomatic)]
+   ["Total cognitive complexity" :cognitive]
+   ["Average maintainability index (comment-free)" (comp fmt :avg-maintainability)]
+   ["Average instability" (comp fmt :avg-instability)]
+   ["Average entropy per file" (comp fmt :avg-entropy)]
+   ["Average redundancy per file" (comp fmt :avg-redundancy)]
+   ["Near-duplicate pairs" :duplicates]
+   ["Abstraction opportunities" #(or (:abstractions %) "skipped")]
+   ["Lint findings" #(:lints % 0)]])
+
 (defn render-summary [summary entries]
-  (str "## Summary\n\n"
-       "| Metric | Value |\n|---|---|\n"
-       (str "| Critical findings | " (count (filter #(= :critical (:severity %)) entries)) " |\n")
-       (str "| Warnings | " (count (filter #(= :warning (:severity %)) entries)) " |\n")
-       (str "| Files | " (:files summary) " |\n")
-       (str "| Files not analyzed | " (:unreadable summary) " |\n")
-       (str "| Lines of code | " (:loc summary) " |\n")
-       (str "| Source lines | " (:sloc summary) " |\n")
-       (str "| Comment lines | " (:cloc summary) " |\n")
-       (str "| Functions | " (:functions summary) " |\n")
-       (str "| Total cyclomatic complexity | " (:cyclomatic summary) " |\n")
-       (str "| Average cyclomatic complexity per function | " (fmt (:avg-cyclomatic summary)) " |\n")
-       (str "| Total cognitive complexity | " (:cognitive summary) " |\n")
-       (str "| Average maintainability index (comment-free) | " (fmt (:avg-maintainability summary)) " |\n")
-       (str "| Average instability | " (fmt (:avg-instability summary)) " |\n")
-       (str "| Average entropy per file | " (fmt (:avg-entropy summary)) " |\n")
-       (str "| Average redundancy per file | " (fmt (:avg-redundancy summary)) " |\n")
-       (str "| Near-duplicate pairs | " (:duplicates summary) " |\n")
-       (str "| Abstraction opportunities | " (or (:abstractions summary) "skipped") " |\n")))
+  (let [severity-count (fn [sev] (count (filter #(= sev (:severity %)) entries)))
+        rows (concat [["Critical findings" (severity-count :critical)]
+                      ["Warnings" (severity-count :warning)]]
+                     (for [[label value-of] summary-rows] [label (value-of summary)]))]
+    (str "## Summary\n\n"
+         "| Metric | Value |\n|---|---|\n"
+         (apply str (for [[label v] rows] (str "| " label " | " v " |\n"))))))
 
 (defn render-files [files]
   (str "## Files\n\n"
@@ -378,22 +405,28 @@
                 (str "\n" (- (count abstractions) top) " more in the EDN and JSON output.\n"))))
        "\n"))
 
+(defn- render-findings
+  "The sections that call for work, from the queue to the lint findings."
+  [{:keys [queue cleanup lints] :as result} top]
+  (str (render-queue queue top)
+       "\n"
+       (render-hotspots result)
+       (render-unusual result)
+       (render-unusual-files result)
+       (render-duplicates result top)
+       (render-abstractions result top)
+       (render-cleanup cleanup)
+       (render-lints lints)))
+
 (defn render
   "The full Markdown report for an analysis result."
   ([result] (render result nil))
-  ([{:keys [files summary edges errors queue cleanup] :as result} {:keys [top]}]
+  ([{:keys [files summary edges errors queue] :as result} {:keys [top]}]
    (str "# Code Metrics Report\n\n"
         (render-summary summary queue)
         "\n"
         (render-errors errors)
-        (render-queue queue (or top default-top))
-        "\n"
-        (render-hotspots result)
-        (render-unusual result)
-        (render-unusual-files result)
-        (render-duplicates result (or top default-top))
-        (render-abstractions result (or top default-top))
-        (render-cleanup cleanup)
+        (render-findings result (or top default-top))
         (render-files files)
         "\n"
         (render-architecture files edges)
