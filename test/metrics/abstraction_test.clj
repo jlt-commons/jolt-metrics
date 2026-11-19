@@ -188,3 +188,15 @@
     (is (= #{'(symbol "#\\L") '(symbol "#\\[") '(symbol "#\\space") '(symbol "#x1F")}
            (set (filter #(and (seq? %) (= 'symbol (first %)))
                         (tree-seq coll? seq (:pattern top))))))))
+
+(deftest the-child-index-only-leaves-out-classes-that-cannot-match
+  ;; every pattern tried against every class of its node key, as before the index
+  (let [units (for [i (range 12)]
+                (unit (str "u" i) '[m]
+                      (list 'section (str "S" (mod i 3))
+                            (list 'render-table (keyword (str "k" (mod i 4))) '(rows m) [:p "none"]))
+                      (list 'when '(seq m) (list 'swap! 'state 'assoc (keyword (str "j" (mod i 2))) 'm))))
+        everything (fn [{:keys [index]} _ key] (sort (get index key)))]
+    (is (= (with-redefs [ab/candidate-classes everything] (ab/opportunities units {:min-size 4}))
+           (ab/opportunities units {:min-size 4})))
+    (is (seq (ab/opportunities units {:min-size 4})))))
