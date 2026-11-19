@@ -69,10 +69,15 @@
     (is (= 0 exit))
     (is (str/starts-with? out "<!doctype html>"))))
 
+(deftest sarif-output-is-a-log
+  (let [{:keys [exit out]} (cli/run ["src" "--format" "sarif" "--no-git" "--no-abstractions"])]
+    (is (= 0 exit))
+    (is (= "2.1.0" (get (clojure.data.json/read-str out) "version")))))
+
 (deftest the-output-extension-picks-the-format
   (let [dir (str (fs/create-temp-dir))]
     (doseq [[file prefix] [["r.html" "<!doctype html>"] ["r.HTM" "<!doctype html>"]
-                           ["r.json" "{"] ["r.edn" "{:"] ["r.md" "# Code Metrics Report"]
+                           ["r.json" "{"] ["r.sarif" "{\"version\""] ["r.edn" "{:"] ["r.md" "# Code Metrics Report"]
                            ["r.txt" "# Code Metrics Report"]]]
       (is (zero? (:exit (cli/run ["src" (str dir "/" file) "--no-git" "--no-abstractions"]))) file)
       (is (str/starts-with? (slurp (str dir "/" file)) prefix) file))))
@@ -198,6 +203,19 @@
         {:keys [exit err]} (cli/run [dir])]
     (is (= 2 exit))
     (is (str/includes? err ":nesting :warning should be at most its :critical"))))
+
+(deftest a-config-can-set-lint-levels
+  (let [dir (temp-project [["a.clj" "(ns a)\n(defn f [x] (do x))"]
+                           [".jolt-metrics.edn" "{:linters {:redundant-do {:level :error}}}"]])
+        data (read-string (:out (cli/run [dir "--format" "edn" "--no-git" "--no-abstractions"])))]
+    (is (= [[:redundant-do :error]] (map (juxt :rule :level) (:lints data))))))
+
+(deftest bad-linters-are-an-error
+  (let [dir (temp-project [["a.clj" "(ns a)"]
+                           [".jolt-metrics.edn" "{:linters {:no-such-rule {:level :off}}}"]])
+        {:keys [exit err]} (cli/run [dir])]
+    (is (= 2 exit))
+    (is (str/includes? err "unknown linter: :no-such-rule"))))
 
 (deftest a-config-cannot-run-code
   (let [dir (temp-project [["a.clj" "(ns a)"] [".jolt-metrics.edn" "{:exclude #=(+ 1 2)}"]])]

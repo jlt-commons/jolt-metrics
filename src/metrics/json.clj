@@ -48,7 +48,8 @@
      "entropy_avg" (:avg-entropy summary)
      "redundancy_avg" (:avg-redundancy summary)
      "duplicates" (:duplicates summary)
-     "abstractions" (:abstractions summary)}))
+     "abstractions" (:abstractions summary)
+     "lints" (:lints summary 0)}))
 
 (defn- violation [{:keys [rule value limit band]}]
   {"rule" rule "value" value "limit" limit "band" band})
@@ -136,26 +137,36 @@
   {"pattern" (pr-str pattern) "size" size "arity" arity "uses" uses "saving" saving
    "sites" (mapv (fn [{:keys [path name line]}] {"path" path "name" name "line" line}) sites)})
 
+(defn- lint [{:keys [path line column rule level message]}]
+  {"path" path "line" line "column" column "rule" rule "level" level "message" message})
+
+(defn- what-to-act-on
+  "The parts of the report that call for work."
+  [result]
+  {"findings" (vec (map-indexed finding (:queue result)))
+   "hotspots" (hotspots result)
+   "unusual_changes" (unusual-changes result)
+   "unusual_files" (mapv unusual-file (:unusual-files result))
+   "duplicates" (mapv (fn [{:keys [distance a b]}]
+                        {"distance" distance "a" (named-span a) "b" (named-span b)})
+                      (:duplicates result))
+   "abstractions" (some->> (:abstractions result) (mapv abstraction))
+   "cleanup" (cleanup (:cleanup result))
+   "lints" (mapv lint (:lints result))})
+
 (defn report
   "The lean report for an analysis result, as data with string keys."
   [result]
   (clean
-   {"tool" "jolt-metrics"
-    "schema_version" schema-version
-    "summary" (summary result)
-    "findings" (vec (map-indexed finding (:queue result)))
-    "hotspots" (hotspots result)
-    "unusual_changes" (unusual-changes result)
-    "unusual_files" (mapv unusual-file (:unusual-files result))
-    "duplicates" (mapv (fn [{:keys [distance a b]}]
-                         {"distance" distance "a" (named-span a) "b" (named-span b)})
-                       (:duplicates result))
-    "abstractions" (some->> (:abstractions result) (mapv abstraction))
-    "thresholds" (limits result)
-    "cleanup" (cleanup (:cleanup result))
-    "errors" (mapv (fn [{:keys [path error]}] {"path" path "error" error}) (:errors result))
-    "files" (mapv file-row (sort-by :path (:files result)))
-    "dependencies" (mapv (fn [[from to]] {"from" from "to" to}) (sort (:edges result)))}))
+   (merge
+    {"tool" "jolt-metrics"
+     "schema_version" schema-version
+     "summary" (summary result)
+     "thresholds" (limits result)
+     "errors" (mapv (fn [{:keys [path error]}] {"path" path "error" error}) (:errors result))
+     "files" (mapv file-row (sort-by :path (:files result)))
+     "dependencies" (mapv (fn [[from to]] {"from" from "to" to}) (sort (:edges result)))}
+    (what-to-act-on result))))
 
 (defn render
   "The lean report as JSON text.  Slashes are left as they are, so paths read

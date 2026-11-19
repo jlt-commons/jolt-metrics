@@ -3,6 +3,7 @@
   is."
   (:require [metrics.reader :as reader]
             [metrics.scanner :as scanner]
+            [metrics.lint :as lint]
             [jolt-lsp.analyze :as lsp-analyze]))
 
 (defn- parse [source]
@@ -23,4 +24,5 @@
    :parse parse
    :scan scanner/scan
    :index index-analysis
+   :lint lint/findings
    :unused-public? true})

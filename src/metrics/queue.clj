@@ -71,17 +71,33 @@
               (limit-violation thresholds :file-lines (get-in file [:loc :sloc]))
               (limit-violation thresholds :efferent (:efferent-coupling file))])))
 
+(defn- weight [violations]
+  (reduce + 0 (map (comp band-weight :band) violations)))
+
+(defn- judged
+  "base with its violations, the severity they make and what to do about them."
+  [base violations]
+  (let [broken (set (map :rule violations))]
+    (assoc base
+           :violations violations
+           :severity (if (some #(= :critical (:band %)) violations) :critical :warning)
+           :actions (vec (take 2 (keep #(when (contains? broken %) (get actions %)) action-order))))))
+
 (defn- entry
   "A queue entry from its violations.  Its score weighs them, and a file's risk
   raises the score of everything in it."
   [base violations risk]
-  (let [broken (set (map :rule violations))
-        weight (reduce + 0 (map (comp band-weight :band) violations))]
-    (assoc base
-           :violations violations
-           :severity (if (some #(= :critical (:band %)) violations) :critical :warning)
-           :score (* weight (+ 1.0 (or risk 0.0)))
-           :actions (vec (take 2 (keep #(when (contains? broken %) (get actions %)) action-order))))))
+  (assoc (judged base violations)
+         :score (* (weight violations) (+ 1.0 (or risk 0.0)))))
+
+(defn without-rules
+  "entry without its violations of rules, its score scaled down to the weight of
+  those left; nil when none are."
+  [entry rules]
+  (let [left (vec (remove #(contains? rules (:rule %)) (:violations entry)))]
+    (when (seq left)
+      (assoc (judged entry left)
+             :score (* (:score entry) (/ (weight left) (weight (:violations entry))))))))
 
 (defn- function-entries [thresholds file risk]
   (for [f (:functions file)

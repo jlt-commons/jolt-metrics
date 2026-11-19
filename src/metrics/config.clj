@@ -5,19 +5,21 @@
      :test-paths [\"test\" \"bench\"]
      :api-namespaces [\"my.lib\" \"my.lib.api.*\"]
      :api-paths [\"src/my/lib/core\"]
-     :thresholds {:cyclomatic {:warning 8 :critical 15}}}
+     :thresholds {:cyclomatic {:warning 8 :critical 15}}
+     :linters {:missing-docstring {:level :warning} :redundant-do {:level :off}}}
 
   Patterns are relative to that directory, and metrics.thresholds says what
-  :thresholds takes.  It is data, read as EDN, so it can't run anything."
+  :thresholds takes, and metrics.lint the rules :linters can set.  It is data, read as EDN, so it can't run anything."
   (:require [clojure.edn :as edn]
             [metrics.thresholds :as thresholds]
+            [metrics.lint :as lint]
             [jolt.fs :as fs]))
 
 (def file-name ".jolt-metrics.edn")
 
 (def ^:private list-keys #{:exclude :test-paths :api-namespaces :api-paths})
 
-(def ^:private known-keys (conj list-keys :thresholds))
+(def ^:private known-keys (conj list-keys :thresholds :linters))
 
 (defn- problem
   "What is wrong with a parsed config, or nil."
@@ -29,7 +31,8 @@
       (not (map? config)) "it should be a map"
       (seq unknown) (str "unknown keys: " (pr-str (vec unknown)))
       (not (every? lists? list-keys)) (str (pr-str (vec list-keys)) " take lists of strings")
-      :else (thresholds/problem (:thresholds config)))))
+      :else (or (thresholds/problem (:thresholds config))
+                (lint/config-problem (:linters config))))))
 
 (defn- parse
   "The config in a file, or {:error message}."

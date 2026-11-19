@@ -26,7 +26,11 @@ source ──► normalized model ──► pure metric visitors ──► queue
                                 coupling.clj, calls.clj
                                 hotspot.clj, rules.clj
                                 entropy.clj (unusual changes and files)
+                                compression.clj (size, redundancy, near-dups)
                                 loc.clj (over scanner's line classes)
+
+forms ──► egraph.clj ──► abstraction.clj (abstraction opportunities)
+forms ──► lint.clj ──► ignore.clj (scanner's markers drop lints/queue/cleanup) ──► sarif.clj
 ```
 
 - **`metrics.reader`** is plain Clojure (not writ-checked): it reads forms with
@@ -38,17 +42,55 @@ source ──► normalized model ──► pure metric visitors ──► queue
 - **`metrics.*`** metric namespaces are pure and writ-constrained: single-arity
   fns, no interop, recursion only via `case`-destructured fields of a `data`
   type (or `rest`/`dec` under a test). They never mention writ and never do I/O.
+- **`metrics.tokens`**, **`metrics.deflate`** and **`metrics.minhash`** are plain
+  Clojure host code behind the writ-checked `metrics.compression`: the normalized
+  token stream (locals as `$0`, strings blanked), DEFLATE sizes, and the MinHash
+  pre-filter for the near-duplicate pair search.
+- **`metrics.egraph`** and **`metrics.abstraction`** are plain Clojure with
+  behaviour tests, not writ-checked (union-find, memo atoms, `pmap`). The e-graph
+  is a persistent value after egg: hashcons, union by size, deferred `rebuild`,
+  per-class occurrence counts, local taint, source-node set and units, and a
+  one-pass memoized `extraction`. `metrics.abstraction` encodes forms as terms
+  (strings keep their text, unlike tokens), saturates with sugar-undoing rules
+  (`->`, `->>`, `when`, `when-not`, `if-not`, nil else), anti-unifies bucketed
+  sorted-neighbourhood pairs (babble), scores with Stitch's `utility` and picks
+  greedily, spending the code each pick covers. Locals are always variables;
+  binders aren't parameters; derived nodes weigh 0 so patterns show as written.
+  It is the slowest pass (about 5s on clojure-lsp): profile before adding work,
+  and keep the output deterministic under `pmap`.
 - **`metrics.core`** orchestrates parse → per-file → coupling → call graph → queue
-  → summary.
+  → summary, then the information findings (unusual changes and files,
+  near-duplicates, and abstractions unless `:abstractions false`). Functions keep
+  `:param-vectors`/`:body` until then; `public-file` drops them.
 - **`metrics.callgraph`** is plain Clojure glue over jolt-lsp: an adapter's optional
   `:index` fn (only Clojure's has one) turns source into a jolt-lsp analysis, and
   `annotate` builds the index from those analyses alone (`db/build-from-analyses`,
   tests left out) and puts `:fan-in`, `:fan-out` and `:reach` on each function.
   The counting and the queue weight (`reach-factor`) live in the writ-checked
   `metrics.calls`. Methods, helpers and Scheme get nil.
+- **`metrics.lint`** is plain Clojure with behaviour tests (`lint_test.clj`): clj-kondo's
+  syntactic rules over read forms, matched by head name, with clj-kondo's messages and
+  default levels (`default-levels`). It is the Clojure adapter's optional `:lint`, so
+  Scheme is never linted. A rule is `(fn [form ctx])` returning `{:rule :message}`s,
+  listed by head in `rules-by-head`; ctx has `:parent`, `:index`, `:in-def`, and a
+  threading step arrives with the threaded value added (`as-called`). Quote and
+  `comment` are data. New rules go in `default-levels` too (config validates against
+  it), and the README's Lint rules table. Run new rules over clj-kondo's own `src`:
+  it should stay clean, since clj-kondo lints itself.
+- **`metrics.scanner`** returns `:ignores`: `#_:jolt-metrics/ignore` or
+  `#_{:jolt-metrics/ignore [rules]}` (and `#_:clj-kondo/ignore`, flagged `:clj-kondo`)
+  with the line range of the form after it. **`metrics.ignore/reviewed`** levels the
+  lints and drops what markers cover from `:lints`, `:queue` (via
+  `queue/without-rules`, which rescales the score) and the unused-function cleanup
+  lists, then adds `:redundant-ignore` for our markers that dropped nothing.
+- **`metrics.sarif`** renders the SARIF 2.1.0 log (`--format sarif`), adapted from
+  clj-kondo's `sarif.clj`. Code borrowed from clj-kondo (EPL-1.0) keeps its header
+  comment and the README credit.
 - **`metrics.paths`** handles globs and resolving loaded files; **`metrics.config`**
   reads `.jolt-metrics.edn`.
-- **`metrics.queue`** holds the thresholds and ranks the findings; **`metrics.cleanup`**
+- **`metrics.thresholds`** holds every configurable limit, including
+  `:duplicates` and `:abstractions {:min-size :max-arity}`, and validates a
+  project's `:thresholds`. **`metrics.queue`** ranks the findings; **`metrics.cleanup`**
   finds what looks unused; **`metrics.git`** reads churn, per-commit entropy
   changes and what git ignores (which `analyze-dir` skips via `:ignored`), and is
   the only shell-out. It reads blobs as bytes and decodes them
@@ -118,9 +160,14 @@ are switches: see the `tree-builders` in `metrics.reader`.
 
 - `jolt -M:test` — run all writ specs + reader tests; `-M:test:dev` swaps in a
   sibling `../writ` checkout.
-- `jolt -m metrics.cli <dir> [out] [--format md|edn|json|html] [--top N] [--days N]
-  [--commits N] [--no-git] [--no-gitignore] [--exclude GLOB] [--config FILE]` — the
+- `jolt -m metrics.cli <dir> [out] [--format md|edn|json|html|sarif] [--top N] [--days N]
+  [--commits N] [--no-git] [--no-gitignore] [--no-abstractions] [--exclude GLOB] [--config FILE]` — the
   report; without `--format`, out's extension picks it.
+
+`self_test` holds `src` to its own thresholds (20 lines, 4 params, cyclomatic 10,
+nesting 3, efferent coupling 19 for a file) and to its own lint rules at default
+levels: new code that breaks one fails the suite, so split it. CLI tests that
+don't need abstractions pass `--no-abstractions` to stay fast.
 
 Note: running `jolt -M:test` relies on `:main-opts` in `deps.edn`; do not
 also pass `-m metrics.runner` on the CLI, or it leaks into the runner's args.

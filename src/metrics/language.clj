@@ -11,6 +11,8 @@
     :index           optional: path and source text to a jolt-lsp analysis, which
                      puts the file's functions in the call graph; see
                      metrics.callgraph
+    :lint            optional: read forms to idiom findings, as metrics.lint gives
+                     them
 
   Adding a language means writing an adapter and listing it here."
   (:require [metrics.clojure :as clojure-language]
