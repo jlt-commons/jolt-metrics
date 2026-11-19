@@ -12,6 +12,7 @@
             [metrics.html :as html]
             [metrics.json :as json]
             [metrics.report :as report]
+            [metrics.sarif :as sarif]
             [clojure.string :as str]
             [jolt.fs :as fs]))
 
@@ -22,7 +23,8 @@
 Prints the report, or writes it to out.
 
   --format FORMAT   md for reading, edn with every finding, json for tools,
-                    html to share (default md, or from out's extension)
+                    html to share, sarif for code scanning (default md, or
+                    from out's extension)
   --top N           Queue entries to show in Markdown and HTML (default 25)
   --days N          How much git history counts as recent churn (default 90)
   --commits N       How many recent commits to check for unusual changes
@@ -45,17 +47,17 @@ Prints the report, or writes it to out.
   {:days 90 :commits 500 :git true :gitignore true :abstractions true
    :top report/default-top :paths []})
 
-(def ^:private formats #{"md" "edn" "json" "html"})
+(def ^:private formats #{"md" "edn" "json" "html" "sarif"})
 
 (def ^:private extension-formats
-  {"md" :md "edn" :edn "json" :json "html" :html "htm" :html})
+  {"md" :md "edn" :edn "json" :json "html" :html "htm" :html "sarif" :sarif})
 
 (def ^:private value-options
   "Options that take a value: which key it sets, how to read it, and what to say
   when it can't be read."
   {"--format" {:key :format
                :parse #(when (contains? formats %) (keyword %))
-               :error "--format takes md, edn, json or html"}
+               :error "--format takes md, edn, json, html or sarif"}
    "--days" {:key :days :parse count-value :error "--days takes a number"}
    "--commits" {:key :commits :parse count-value :error "--commits takes a number"}
    "--top" {:key :top :parse count-value :error "--top takes a number"}
@@ -97,7 +99,8 @@ Prints the report, or writes it to out.
   {:md (fn [result top] (report/render result {:top top}))
    :edn (fn [result _] (pr-str result))
    :json (fn [result _] (json/render result))
-   :html (fn [result top] (html/render result {:top top}))})
+   :html (fn [result top] (html/render result {:top top}))
+   :sarif (fn [result _] (sarif/render result))})
 
 (defn- output-format
   "The format asked for, else the one out's extension names, else Markdown."

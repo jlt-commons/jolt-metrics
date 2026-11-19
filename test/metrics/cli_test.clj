@@ -69,10 +69,15 @@
     (is (= 0 exit))
     (is (str/starts-with? out "<!doctype html>"))))
 
+(deftest sarif-output-is-a-log
+  (let [{:keys [exit out]} (cli/run ["src" "--format" "sarif" "--no-git" "--no-abstractions"])]
+    (is (= 0 exit))
+    (is (= "2.1.0" (get (clojure.data.json/read-str out) "version")))))
+
 (deftest the-output-extension-picks-the-format
   (let [dir (str (fs/create-temp-dir))]
     (doseq [[file prefix] [["r.html" "<!doctype html>"] ["r.HTM" "<!doctype html>"]
-                           ["r.json" "{"] ["r.edn" "{:"] ["r.md" "# Code Metrics Report"]
+                           ["r.json" "{"] ["r.sarif" "{\"version\""] ["r.edn" "{:"] ["r.md" "# Code Metrics Report"]
                            ["r.txt" "# Code Metrics Report"]]]
       (is (zero? (:exit (cli/run ["src" (str dir "/" file) "--no-git" "--no-abstractions"]))) file)
       (is (str/starts-with? (slurp (str dir "/" file)) prefix) file))))
