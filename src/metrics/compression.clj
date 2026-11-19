@@ -26,9 +26,9 @@
   Comparing every pair of definitions is quadratic, so two cheap tests rule most
   pairs out first: sizes too far apart to be within max-distance, since C(xy) is
   at least the larger of C(x) and C(y), and a MinHash estimate of how many token
-  trigrams the two share.  The second is an estimate, so a pair that only just
-  qualifies can be missed; definitions that are the same once normalized never
-  are."
+  trigrams the two share, confirmed by the exact share before compressing.  The
+  estimate comes first, so a pair that only just qualifies can be missed;
+  definitions that are the same once normalized never are."
   (:require [clojure.string :as str]
             [metrics.deflate :as deflate]
             [metrics.minhash :as minhash]))
@@ -47,9 +47,10 @@
   40)
 
 (def min-shared
-  "The estimated share of token trigrams two definitions need in common before
-  their distance is computed.  Every near-duplicate found in clojure-lsp shared
-  at least 0.28; this leaves room for the estimate's error."
+  "The share of token trigrams two definitions need in common, estimated and then
+  exactly, before their distance is computed.  Every near-duplicate found in
+  clojure-lsp shared at least 0.28 by estimate, and every one in jolt at least
+  0.15 exactly; this leaves room for the estimate's error."
   0.12)
 
 (defn token-text
@@ -98,7 +99,8 @@
     (assoc u
            :text text
            :size (deflate/compressed-size text)
-           :signature (minhash/signature (:tokens u)))))
+           :signature (minhash/signature (:tokens u))
+           :trigrams (minhash/trigrams (:tokens u)))))
 
 (defn within?
   "Is b inside a, as a helper sits inside the definition it was lifted out of?"
