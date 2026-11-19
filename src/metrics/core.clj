@@ -21,7 +21,7 @@
             [metrics.tokens :as tokens]
             [metrics.thresholds :as thresholds]
             [metrics.callgraph :as callgraph]
-            [metrics.lint :as lint]
+            [metrics.ignore :as ignore]
             [jolt.fs :as fs]))
 
 (defn- average
@@ -169,7 +169,8 @@
       :functions (mapv #(dissoc % :halstead) fns)
       :halstead file-h
       :index-analysis (when-let [index (:index lang)] (index path source))
-      :lints (when-let [lint-forms (:lint lang)] (lint-forms forms))}
+      :lints (when-let [lint-forms (:lint lang)] (lint-forms forms))
+      :ignores (:ignores scanned)}
      (file-scores model fns)
      (index-fields (file-index fns (:volume file-h) locs)))))
 
@@ -267,7 +268,7 @@
   [file]
   (-> file
       (dissoc :symbols :qualifiers :libspecs :unused-public? :load-paths :word-counts
-              :index-analysis :lints)
+              :index-analysis :lints :ignores)
       (update :functions (fn [fns] (mapv #(dissoc % :self-refs :tokens :param-vectors :body) fns)))))
 
 (defn- near-duplicates
@@ -379,13 +380,6 @@
          :abstractions (some-> (:abstractions findings) count)
          :lints (count (:lints findings))))
 
-(defn- project-lints
-  "Every file's lint findings at the levels :linters gives them, by path and line."
-  [files linters]
-  (vec (for [f (sort-by :path files)
-             finding (lint/with-levels (:lints f) linters)]
-         (assoc finding :path (:path f)))))
-
 (defn- queued
   "The work the limits find: the hotspots, and the refactoring queue."
   [limits files]
@@ -393,13 +387,24 @@
     {:hotspots (queue/hotspots limits files risk-of)
      :queue (queue/build limits files risk-of)}))
 
+(defn- reviewed
+  "What calls for work: the information findings, the queue, the cleanup
+  candidates and the lint findings, less what ignore markers cover."
+  [limits files {:keys [history linters] :as opts}]
+  (ignore/reviewed
+   (merge (information-findings limits files history (false? (:abstractions opts)))
+          (queued limits files)
+          {:cleanup (cleanup/candidates-of files (select-keys opts [:root :api-namespaces :api-paths]))})
+   files
+   linters))
+
 (defn- analyze-loaded
   "The whole result for [path load-source] pairs.  With :changes, a map of path to
   commit count over the last :days days, it also has churn: hotspots, and a queue
   that puts them first.  With :history, each commit's entropy change as
   metrics.git/history gives it, it has the unusual ones.  :thresholds are a
   project's own limits, as metrics.thresholds takes them."
-  [loaders {:keys [changes days root test-paths history] :as opts}]
+  [loaders {:keys [changes days root test-paths] :as opts}]
   (let [{:keys [files errors]} (load-all loaders)
         edges (dependency-edges files root)
         files (assoc-surprisal
@@ -407,17 +412,15 @@
                 (annotated-files files edges changes #(mark-test-file % root test-paths))))
         limits (thresholds/with-defaults (:thresholds opts))
         result-files (mapv public-file files)
-        findings (assoc (information-findings limits files history (false? (:abstractions opts)))
-                        :lints (project-lints files (:linters opts)))]
-    (merge findings (queued limits files)
+        findings (reviewed limits files opts)]
+    (merge findings
            {:files result-files
             :errors errors
             :edges (vec edges)
             :summary (result-summary result-files errors findings)
             :changes changes
             :days (when changes days)
-            :thresholds limits
-            :cleanup (cleanup/candidates-of files (select-keys opts [:root :api-namespaces :api-paths]))})))
+            :thresholds limits})))
 
 (defn analyze-files
   "Analyze a collection of [path source] pairs and resolve coupling between them.

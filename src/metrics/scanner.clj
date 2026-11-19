@@ -5,7 +5,8 @@
 
   The machinery is shared, and a syntax map says what a language's tokens are; this
   namespace holds Clojure's.  It works on any text, balanced or not: an unterminated
-  string runs to the end, and an unmatched delimiter is simply ignored.")
+  string runs to the end, and an unmatched delimiter is simply ignored."
+  (:require [clojure.edn :as edn]))
 
 ;; --- tokens --------------------------------------------------------------
 
@@ -196,6 +197,46 @@
         (range i (inc (form-end toks matches (inc i))))))
     (map-indexed vector toks))))
 
+;; --- ignore markers ------------------------------------------------------
+;;
+;; After clj-kondo's #_:clj-kondo/ignore (https://github.com/clj-kondo/clj-kondo):
+;; a discarded :jolt-metrics/ignore, or a map of it to the rules to leave out,
+;; covers the form that follows.  clj-kondo's own marker is noted too, since this
+;; lints with clj-kondo's rules.
+
+(def ^:private marker-keys {:jolt-metrics/ignore false :clj-kondo/ignore true})
+
+(defn- marker
+  "What the text of a discarded form asks to leave out, {:rules :all or #{rule}}
+  with :clj-kondo for clj-kondo's marker, or nil when it is no marker."
+  [text]
+  (let [v (try (edn/read-string text) (catch Exception _ nil))
+        k (if (map? v) (some #(when (contains? v %) %) (keys marker-keys)) v)
+        rules (when (map? v) (get v k))]
+    (when (contains? marker-keys k)
+      (cond-> {:rules (if (sequential? rules) (set rules) :all)}
+        (marker-keys k) (assoc :clj-kondo true)))))
+
+(defn- ignore-at
+  "The ignore marker the discard at token i makes, with where it is and the lines
+  of the form it covers, or nil."
+  [toks matches i]
+  (let [end (form-end toks matches (inc i))
+        target (inc end)
+        m (marker (apply str (interpose " " (map :text (subvec toks (inc i) (inc end))))))]
+    (when (and m (< target (count toks)))
+      (merge {:line (:line (get toks i))
+              :column (:col (get toks i))
+              :from (:line (get toks target))
+              :to (:end-line (get toks (form-end toks matches target)))}
+             m))))
+
+(defn- ignores
+  "Every ignore marker in the tokens."
+  [toks matches]
+  (vec (keep (fn [i] (when (= :discard (:kind (get toks i))) (ignore-at toks matches i)))
+             (range (count toks)))))
+
 ;; --- the result ----------------------------------------------------------
 
 (defn- line-count
@@ -252,7 +293,8 @@
 
 (defn scan
   "Scan source into {:classes [per-line :blank|:comment|:code]
-                     :extents {[line col] end-line of the list opening there}}."
+                     :extents {[line col] end-line of the list opening there}
+                     :ignores [ignore markers; see ignore-at]}."
   ([source] (scan source clojure-syntax))
   ([source {:keys [doc-indexes list-opens] :as syntax}]
    (let [toks (tokens source syntax)
@@ -260,7 +302,8 @@
      {:classes (classify-lines source toks
                                (doc-indexes toks matches)
                                (discarded-indexes toks matches))
-      :extents (list-extents toks matches list-opens)})))
+      :extents (list-extents toks matches list-opens)
+      :ignores (ignores toks matches)})))
 
 (defn line-classes
   "The class of each line of Clojure source: :blank, :comment or :code."
