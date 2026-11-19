@@ -41,6 +41,7 @@
   merge/purge problem for large databases, 1995).  Copies sort together, so
   a pattern used often is very likely to have some pair of its uses compared."
   (:require [clojure.edn :as edn]
+            [clojure.set :as set]
             [metrics.egraph :as eg]
             [metrics.tokens :as tokens]))
 
@@ -402,6 +403,49 @@
             (reduce (fn [m n] (update m (node-key g n) (fnil conj #{}) id)) m (eg/nodes g id)))
           {} ids))
 
+(defn- child-keys
+  "How the child class at a node's position can be told apart: the class
+  itself, and the index key of each of its nodes."
+  [g child]
+  (let [c (eg/find g child)]
+    (cons [:class c] (distinct (map #(node-key g %) (eg/nodes g c))))))
+
+(defn- add-child-keys [g id]
+  (fn [m n]
+    (let [k (node-key g n)]
+      (reduce (fn [m i]
+                (reduce (fn [m ck] (let [kk [k i ck]] (assoc! m kk (conj (get m kk #{}) id))))
+                        m (child-keys g (nth n i))))
+              m (range 2 (count n))))))
+
+(defn- child-index
+  "{[node key, position, child key] classes}: which classes have a node with
+  that key whose child at that position has that key.  A pattern whose children
+  are concrete only needs to try the classes in every one of its children's
+  sets, which on a large tree is a small part of its node key's."
+  [g ids]
+  (persistent!
+   (reduce (fn [m id] (reduce (add-child-keys g id) m (eg/nodes g id)))
+           (transient {}) ids)))
+
+(defn- pattern-child-key [g q]
+  (case (first q)
+    :var nil
+    :class [:class (eg/find g (second q))]
+    (pattern-key g q)))
+
+(defn- candidate-classes
+  "The classes pattern p, of index key key, can match, in id order: those of its
+  key narrowed by every concrete child.  Matching still decides; this only
+  leaves out classes that cannot match."
+  [{:keys [g index children]} p key]
+  (let [sets (keep (fn [i] (when-let [ck (pattern-child-key g (nth p i))]
+                             (get children [key i ck] #{})))
+                   (range 2 (count p)))]
+    (sort (if (seq sets)
+            (reduce set/intersection (sort-by count sets))
+            (get index key)))))
+
 ;; --- candidates --------------------------------------------------------------
 
 (defn- sketch
@@ -494,10 +538,10 @@
 (defn- scored
   "A pattern with the classes it matches and the code each match takes up, or
   nil if it is not worth naming."
-  [{:keys [g index] :as ctx} p]
+  [{:keys [g] :as ctx} p]
   (when-let [{:keys [size arity key] :as o} (shape ctx p)]
     (let [matched (filter #(and (pos? (eg/occurrences g %)) (seq (match g p % {})))
-                          (get index key))
+                          (candidate-classes ctx p key))
           uses (reduce + 0 (map #(eg/occurrences g %) matched))]
       (when (and (>= uses 2) (pos? (utility size arity uses)))
         (assoc (dissoc o :key)
@@ -602,6 +646,9 @@
         ids (filter #(and (pos? (eg/occurrences g %))
                           (>= (class-size ctx %) (:min-size opts)))
                     (eg/class-ids g))
-        ctx (assoc ctx :index (node-index g (eg/class-ids g)) :opts opts)
+        ctx (assoc ctx
+                   :index (node-index g (eg/class-ids g))
+                   :children (child-index g (eg/class-ids g))
+                   :opts opts)
         patterns (distinct (map number-holes (all-patterns ctx (candidate-pairs ctx ids (:window opts)))))]
     (select g units (in-parallel #(scored ctx %) patterns) (:top opts))))

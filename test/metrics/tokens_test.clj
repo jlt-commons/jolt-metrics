@@ -1,7 +1,7 @@
 (ns metrics.tokens-test
   "Behaviour tests for the token stream compression measures, and for the host
   code under metrics.compression: DEFLATE sizes and the MinHash pair search."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is testing]]
             [metrics.tokens :as t]
             [metrics.deflate :as deflate]
             [metrics.minhash :as minhash]
@@ -103,3 +103,22 @@
   (is (= [] (minhash/similar-pairs [(candidate "a" 100 tokens)
                                     (candidate "b" 100 (mapv #(str "u" %) (range 60)))]
                                    0.35 0.12))))
+
+;; --- exact trigram overlap -------------------------------------------------------
+
+(deftest the-exact-share-is-the-jaccard-of-trigrams
+  (is (= 1.0 (minhash/shared (minhash/trigrams tokens) (minhash/trigrams tokens))))
+  (is (= 0.0 (minhash/shared (minhash/trigrams tokens) (minhash/trigrams (mapv #(str "u" %) (range 60))))))
+  ;; t0..t59 has 58 trigrams; t0..t29 shares 28 of them
+  (is (= (/ 28.0 58) (minhash/shared (minhash/trigrams tokens) (minhash/trigrams (subvec tokens 0 30)))))
+  (is (= 0.0 (minhash/shared (minhash/trigrams []) (minhash/trigrams [])))))
+
+(deftest a-pair-needs-the-exact-share-too
+  (testing "signatures that agree are not enough when the trigrams don't"
+    (is (= [] (minhash/similar-pairs [(assoc (candidate "a" 100 tokens) :trigrams (minhash/trigrams tokens))
+                                      (assoc (candidate "b" 100 tokens)
+                                             :trigrams (minhash/trigrams (mapv #(str "u" %) (range 60))))]
+                                     0.35 0.12))))
+  (is (= 1 (count (minhash/similar-pairs [(assoc (candidate "a" 100 tokens) :trigrams (minhash/trigrams tokens))
+                                          (assoc (candidate "b" 100 tokens) :trigrams (minhash/trigrams tokens))]
+                                         0.35 0.12)))))
