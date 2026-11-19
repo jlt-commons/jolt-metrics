@@ -123,6 +123,16 @@
   (is (flags? :unsorted-required-namespaces "(ns a (:require [c] [b]))"))
   (is (not (flags? :unsorted-required-namespaces "(ns a (:require [b] [c]))"))))
 
+(deftest threading-supplies-an-argument
+  (is (not (flags? :single-operand-comparison "(-> x (= 1))")))
+  (is (not (flags? :redundant-str-call "(some->> s (str \"(?i)\"))")))
+  (is (not (flags? :redundant-call "(cond-> m a (merge n))")))
+  (is (not (flags? :single-operand-comparison "(doto x (= 1))")))
+  (is (flags? :equals-true "(-> x (= true))"))
+  (is (flags? :plus-one "(->> x (+ 1))"))
+  (testing "the threaded expression itself is not a step"
+    (is (flags? :single-operand-comparison "(-> (= x) f)"))))
+
 (deftest data-is-not-code
   (testing "quoted forms and comment blocks are not linted"
     (is (empty? (found "'(if x 1)")))

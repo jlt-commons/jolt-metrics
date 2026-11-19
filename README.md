@@ -23,6 +23,7 @@ refactoring queue: what to clean up first, and why.
 | Entropy / surprisal | `metrics.entropy` | a file's word entropy, and how unexpected its words are given the rest of the project |
 | Compressed size / redundancy | `metrics.compression` | an upper bound on a definition's or file's Kolmogorov complexity, and how much of a file is repetition |
 | Near-duplicates | `metrics.compression` | pairs of definitions whose normalized compression distance says one is nearly a copy of the other |
+| Lint findings | `metrics.lint` | idioms with a simpler form and likely bugs, after [clj-kondo](https://github.com/clj-kondo/clj-kondo)'s rules (Clojure only) |
 | Abstraction opportunities | `metrics.abstraction` | code shapes that recur often enough for one function to replace them, with their parameters and what extracting them saves |
 
 ## Usage
@@ -90,7 +91,7 @@ jolt -M:metrics src report.html
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--format md\|edn\|json\|html` | from the output file, else `md` | Markdown for reading, EDN with the full result, JSON for tools, HTML to share |
+| `--format md\|edn\|json\|html\|sarif` | from the output file, else `md` | Markdown for reading, EDN with the full result, JSON for tools, HTML to share, SARIF for code scanning |
 | `--top N` | 25 | queue entries to show in Markdown and HTML |
 | `--days N` | 90 | how much git history counts as recent churn |
 | `--commits N` | 500 | how many recent commits to check for unusual changes |
@@ -100,8 +101,8 @@ jolt -M:metrics src report.html
 | `--exclude GLOB` | | leave out matching files, relative to the directory; can be repeated |
 | `--config FILE` | `<dir>/.jolt-metrics.edn` | the config file |
 
-Without `--format`, an output file ending in `.md`, `.edn`, `.json`, `.html` or
-`.htm` (any case) gets that format. Anything else, or no output file, gets
+Without `--format`, an output file ending in `.md`, `.edn`, `.json`, `.html`,
+`.htm` or `.sarif` (any case) gets that format. Anything else, or no output file, gets
 Markdown.
 
 The command exits 2 on bad usage or a missing directory. An unreadable file
@@ -118,7 +119,9 @@ Put project settings in `.jolt-metrics.edn` in the analyzed directory:
  :api-namespaces ["my.lib" "my.lib.api.*"]
  :api-paths ["src/my/lib/core"]
  :thresholds {:cyclomatic {:warning 8 :critical 15}
-              :duplicates {:max-distance 0.3}}}
+              :duplicates {:max-distance 0.3}}
+ :linters {:missing-docstring {:level :warning}
+           :missing-else-branch {:level :off}}}
 ```
 
 `:exclude` patterns are relative to that directory, and `--exclude` adds to
@@ -173,6 +176,43 @@ says what's wrong.
 Raising `:unusual :z` or lowering `:duplicates :max-distance` gives fewer,
 surer findings.
 
+#### Lint rules
+
+`:linters` sets a lint rule's level: `:off`, `:info`, `:warning` or `:error`.
+The rules, their messages and their default levels come from
+[clj-kondo](https://github.com/clj-kondo/clj-kondo/blob/master/doc/linters.md),
+so its documentation describes each one. An unknown rule or level stops the run
+with exit code 2.
+
+| On by default | Off by default |
+|---|---|
+| `redundant-do`, `redundant-let`, `cond-else`, `constant-condition`, `missing-else-branch`, `missing-body-in-when`, `missing-clause-in-try`, `single-operand-comparison`, `single-logical-operand`, `not-empty?`, `inline-def`, `loop-without-recur`, `case-duplicate-test` (error), `earmuffed-var-not-dynamic`, `docstring-blank`, `misplaced-docstring`, `refer-all`, `use`, and at `:info` `redundant-nested-call`, `redundant-str-call`, `redundant-ignore` | `redundant-let-binding`, `if-nil-return`, `if-x-x-y`, `redundant-call`, `redundant-fn-wrapper`, `equals-true`, `equals-false`, `equals-nil`, `plus-one`, `minus-one`, `single-key-in`, `dynamic-var-not-earmuffed`, `def-fn`, `missing-docstring`, `docstring-no-summary`, `docstring-leading-trailing-whitespace`, `unsorted-required-namespaces` |
+
+clj-kondo resolves every var; these rules match a call's head by name, with a
+`clojure.core/` qualifier removed, so a local that shadows a core name can make
+a false finding. Quoted forms and `comment` blocks aren't linted, and a
+threading macro's steps count the threaded value as an argument.
+
+#### Ignore markers
+
+As with clj-kondo's `#_:clj-kondo/ignore`, a marker before a form leaves that
+form's findings out of the report:
+
+```clojure
+#_:jolt-metrics/ignore
+(defn parse [tokens] ...)                    ; no lint, queue or cleanup findings
+
+#_{:jolt-metrics/ignore [:lines :redundant-do]}
+(defn render [result] ...)                   ; only those rules
+```
+
+A marker covers lint findings inside the form, the queue rules a definition
+starting in it broke (`cyclomatic`, `lines`, `params` and so on, the rule names
+in the queue), and the `unused-private` and `unreferenced-public` cleanup
+candidates. A marker that leaves nothing out is itself a `redundant-ignore`
+finding. `#_:clj-kondo/ignore` covers lint findings too, and is never redundant,
+since clj-kondo may need it for rules of its own.
+
 ### The report
 
 1. Summary: finding counts and project totals.
@@ -198,8 +238,10 @@ surer findings.
    to a used `:refer` isn't listed, but unused referred names are. Matching is
    by name and can't see runtime lookups or outside callers, so check public
    functions before removing them, and list your API namespaces in the config.
-10. Files and Architecture: per-file numbers, coupling and dependencies.
-11. Thresholds: what the severities mean.
+10. [Lint findings](#lint-rules): idioms with a simpler form and likely bugs,
+    each with its rule and level.
+11. Files and Architecture: per-file numbers, coupling and dependencies.
+12. Thresholds: what the severities mean.
 
 | Rule | Warning | Critical | Where the limits come from |
 |---|---|---|---|
@@ -405,14 +447,14 @@ EDN's 130 KB.
 {"tool": "jolt-metrics", "schema_version": 1,
  "summary": {...}, "findings": [...], "hotspots": [...], "duplicates": [...],
  "abstractions": [...],
- "thresholds": {...}, "cleanup": {...},
+ "thresholds": {...}, "cleanup": {...}, "lints": [...],
  "errors": [...], "files": [...], "dependencies": [...]}
 ```
 
 | Key | Holds |
 |---|---|
 | `schema_version` | 1; it goes up when a key is removed or changes meaning |
-| `summary` | `critical`, `warnings`, `files`, `files_not_analyzed`, `loc`, `sloc`, `cloc`, `functions`, `cyclomatic_total`, `cyclomatic_avg`, `cognitive_total`, `maintainability_avg`, `instability_avg`, `entropy_avg`, `redundancy_avg`, `duplicates` (how many pairs), `abstractions` (how many; `null` under `--no-abstractions`) |
+| `summary` | `critical`, `warnings`, `files`, `files_not_analyzed`, `loc`, `sloc`, `cloc`, `functions`, `cyclomatic_total`, `cyclomatic_avg`, `cognitive_total`, `maintainability_avg`, `instability_avg`, `entropy_avg`, `redundancy_avg`, `duplicates` (how many pairs), `abstractions` (how many; `null` under `--no-abstractions`), `lints` (how many) |
 | `findings` | the whole queue, worst first and never capped by `--top`: `rank`, `severity`, `kind`, `name`, `path`, `line`, `end_line`, `changes`, `score`, `metrics`, `violations` (`rule`, `value`, `limit`, `band`), `actions` |
 | `hotspots` | `path`, `changes`, `complexity`, `risk`; `null` under `--no-git` |
 | `unusual_changes` | `commits` (how many were checked) and `changes`, most unusual first: `commit`, `date`, `subject`, `delta` (bits), `z`, `files`; `null` under `--no-git` |
@@ -421,6 +463,7 @@ EDN's 130 KB.
 | `abstractions` | `pattern` (as Clojure text), `size`, `arity`, `uses`, `saving`, and `sites`, each `path`, `name`, `line`; most saving first; `null` under `--no-abstractions` |
 | `thresholds` | the limits the report used, as in [Thresholds](#thresholds), keys in snake_case: `cyclomatic`, ..., `file_lines`, `hotspot` (`warning`, `critical`, `min_changes`), `unusual` (`z`), `duplicates` (`max_distance`, `min_tokens`), `abstractions` (`min_size`, `max_arity`) |
 | `cleanup` | `unused_requires` (`path`, `lib`, `alias`, `refers`), `unused_private` and `unreferenced_public` (`path`, `name`, `line`) |
+| `lints` | `path`, `line`, `column`, `rule`, `level`, `message`, in source order; ignored findings and rules that are `:off` left out |
 | `errors` | `path`, `error` for each file not analyzed |
 | `files` | `path`, `language`, `namespace`, `loc`, `sloc`, `cloc`, `cyclomatic`, `cognitive`, `maintainability`, `efferent`, `afferent`, `instability`, `instability_band`, `changes`, `entropy`, `surprisal`, `compressed_size` (bytes), `redundancy` |
 | `dependencies` | `from`, `to` |
@@ -442,6 +485,15 @@ Unusual changes tables by any column, filters files by path and the queue by
 severity, collapses sections, and offers a Download JSON button for the lean
 JSON embedded in the page. Without the script, the tables are all still there;
 only the controls are hidden.
+
+### SARIF
+
+`--format sarif` writes a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
+log for code scanning, such as GitHub's: each lint finding at its level, each
+rule a queue entry broke (`error` when critical, else `warning`), and the
+cleanup candidates as notes. Paths are as the analyzer saw them, so run it from
+the repository root (`jolt-metrics src out.sarif`) for paths a scanner can
+place. An unused require has no line of its own and points at line 1.
 
 ### API
 
@@ -476,7 +528,8 @@ only the controls are hidden.
 ```
 
 A result has `:files`, `:errors`, `:edges`, `:summary`, `:queue`, `:hotspots`,
-`:unusual-changes`, `:unusual-files` and `:cleanup`. Each file has `:loc`,
+`:unusual-changes`, `:unusual-files`, `:cleanup` and `:lints`. `analyze-files`
+and `analyze-dir` take `:linters` to set rule levels, as in the config. Each file has `:loc`,
 `:cyclomatic`, `:cognitive`, `:halstead`, `:entropy`, `:surprisal`, `:words`,
 `:maintainability-index-without-comments`, `:functions` (per-definition
 metrics), and the coupling fields `:efferent-coupling`, `:afferent-coupling`,
@@ -516,13 +569,17 @@ source ──► normalized model ──► pure metric visitors ──► queue
   fan-out and reach from resolved references between vars. Passing a function
   counts as a reference, the same as calling it.
 - `metrics.queue` and `metrics.cleanup` turn the numbers into work.
+- `metrics.lint` finds idioms and likely bugs in read forms; it's the Clojure
+  adapter's `:lint`. `metrics.scanner` finds ignore markers, and
+  `metrics.ignore` drops what they cover from the lint findings, the queue and
+  the cleanup candidates.
   `metrics.thresholds` holds the limits: the defaults merged with the project's
   own, and validated.
 - `metrics.git` reads churn and each commit's entropy change. It's the only
   part that shells out.
 - `metrics.report` renders Markdown, `metrics.json` the lean JSON, and
   `metrics.html` the HTML page, inlining `resources/metrics/html/report.css`
-  and `report.js`.
+  and `report.js`, and `metrics.sarif` the SARIF log.
 
 A definition is a `defn`, `defn-`, `defmacro`, `defmethod`, `deftest`, a method
 of `defrecord`, `deftype`, `extend-type` or `extend-protocol`, or a `def`,
@@ -676,3 +733,7 @@ Copyright (c) 2026 Dmitri Sotnikov and Burin Choomnuan.
 
 Distributed under the [Eclipse Public License 2.0](LICENSE). SPDX identifier:
 `EPL-2.0`.
+
+The lint rules (`metrics.lint`), the ignore markers and the SARIF output
+(`metrics.sarif`) are adapted from [clj-kondo](https://github.com/clj-kondo/clj-kondo),
+Copyright (c) Michiel Borkent, distributed under the Eclipse Public License 1.0.

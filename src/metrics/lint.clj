@@ -403,10 +403,34 @@
   (let [m (when (seq? form) (meta form))]
     {:line (or (:line m) line) :column (or (:column m) column)}))
 
+(def ^:private thread-first '#{-> some-> cond-> doto})
+(def ^:private thread-last '#{->> some->> cond->>})
+
+(defn- step?
+  "Is the sub-form at index of a threading form one of its steps?  A cond->
+  takes a test before each step."
+  [threading index]
+  (if (contains? '#{cond-> cond->>} threading)
+    (and (>= index 3) (odd? index))
+    (>= index 2)))
+
+(defn- as-called
+  "form as it is called: a threading step gets the threaded value as an argument,
+  first or last, so its arity is what the call sees."
+  [form {:keys [parent index]}]
+  (let [h (head parent)
+        threaded 'metrics.lint/threaded]
+    (cond
+      (not (and (seq? form) (step? h index))) form
+      (contains? thread-first h) (apply list (first form) threaded (rest form))
+      (contains? thread-last h) (concat form [threaded])
+      :else form)))
+
 (defn- list-findings [form ctx]
-  (for [rule (get rules-by-head (head form))
-        f (rule form ctx)]
-    (merge f (select-keys ctx [:line :column]))))
+  (let [called (as-called form ctx)]
+    (for [rule (get rules-by-head (head form))
+          f (rule called ctx)]
+      (merge f (select-keys ctx [:line :column])))))
 
 (defn- walk [form ctx]
   (let [here (merge ctx (position form ctx))
