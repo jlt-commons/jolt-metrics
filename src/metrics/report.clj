@@ -106,6 +106,38 @@
                 (str "\nand " (- (count entries) top) " more; use `--format edn` for all.\n")))
          "_nothing over the thresholds_\n")))
 
+;; --- since the baseline --------------------------------------------------
+
+(defn- score-move [{:keys [entry before-score changed]}]
+  (str "- `" (:name entry) "`" (location entry) ": score "
+       (format "%.1f" (double before-score)) " → " (format "%.1f" (double (:score entry)))
+       (when (seq changed)
+         (str " (" (str/join ", " (for [[k [a b]] (sort-by key changed)]
+                                    (str (name k) " " a " → " b)))
+              ")"))
+       "\n"))
+
+(defn- named-entry [e]
+  (str "- `" (:name e) "`" (location e) "\n"))
+
+(defn- baseline-group [title lines top]
+  (when (seq lines)
+    (str "\n### " title "\n\n" (apply str (take top lines))
+         (when (> (count lines) top) (str "- and " (- (count lines) top) " more\n")))))
+
+(defn render-since-baseline
+  "What changed in the queue since the baseline run, or nothing without one."
+  [{:keys [fixed improved worse new unchanged] :as since} top]
+  (when since
+    (str "## Since the baseline\n\n"
+         (count fixed) " fixed, " (count improved) " improved, " (count worse) " worse, "
+         (count new) " new, " unchanged " unchanged.\n"
+         (baseline-group "Fixed" (map named-entry fixed) top)
+         (baseline-group "Worse" (map score-move worse) top)
+         (baseline-group "Improved" (map score-move improved) top)
+         (baseline-group "New" (map named-entry new) top)
+         "\n")))
+
 ;; --- hotspots ------------------------------------------------------------
 
 (defn hotspots-intro
@@ -407,8 +439,9 @@
 
 (defn- render-findings
   "The sections that call for work, from the queue to the lint findings."
-  [{:keys [queue cleanup lints] :as result} top]
-  (str (render-queue queue top)
+  [{:keys [queue cleanup lints since-baseline] :as result} top]
+  (str (render-since-baseline since-baseline top)
+       (render-queue queue top)
        "\n"
        (render-hotspots result)
        (render-unusual result)

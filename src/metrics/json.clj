@@ -137,6 +137,25 @@
   {"pattern" (pr-str pattern) "size" size "arity" arity "uses" uses "saving" saving
    "sites" (mapv (fn [{:keys [path name line]}] {"path" path "name" name "line" line}) sites)})
 
+(defn- baseline-entry [{:keys [kind name path line score]}]
+  {"kind" kind "name" name "path" path "line" line "score" score})
+
+(defn- baseline-move [{:keys [entry before-score changed]}]
+  (assoc (baseline-entry entry)
+         "before_score" before-score
+         "changed" (into {} (for [[k [a b]] changed]
+                              [(str/replace (name k) "-" "_") {"before" a "after" b}]))))
+
+(defn- since-baseline
+  "What changed in the queue since the baseline, or nil without one."
+  [{:keys [fixed improved worse new unchanged] :as since}]
+  (when since
+    {"fixed" (mapv baseline-entry fixed)
+     "improved" (mapv baseline-move improved)
+     "worse" (mapv baseline-move worse)
+     "new" (mapv baseline-entry new)
+     "unchanged" unchanged}))
+
 (defn- lint [{:keys [path line column rule level message]}]
   {"path" path "line" line "column" column "rule" rule "level" level "message" message})
 
@@ -152,7 +171,8 @@
                       (:duplicates result))
    "abstractions" (some->> (:abstractions result) (mapv abstraction))
    "cleanup" (cleanup (:cleanup result))
-   "lints" (mapv lint (:lints result))})
+   "lints" (mapv lint (:lints result))
+   "since_baseline" (since-baseline (:since-baseline result))})
 
 (defn report
   "The lean report for an analysis result, as data with string keys."

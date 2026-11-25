@@ -100,6 +100,18 @@ jolt -M:metrics src report.html
 | `--no-abstractions` | | skip the search for abstraction opportunities, the slowest pass |
 | `--exclude GLOB` | | leave out matching files, relative to the directory; can be repeated |
 | `--config FILE` | `<dir>/.jolt-metrics.edn` | the config file |
+| `--baseline FILE` | | an earlier `--format edn` report; the report then opens with what the queue gained and lost since |
+
+To check a refactor, save the report before it and compare after:
+
+```console
+jolt-metrics src before.edn            # before the change
+jolt-metrics src --baseline before.edn # after: fixed, improved, worse, new
+```
+
+Entries match by kind, path and name, so a definition that moved is still the
+same entry. One that was renamed counts as fixed under its old name and new
+under its new one.
 
 Without `--format`, an output file ending in `.md`, `.edn`, `.json`, `.html`,
 `.htm` or `.sarif` (any case) gets that format. Anything else, or no output file, gets

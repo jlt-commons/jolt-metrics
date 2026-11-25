@@ -71,6 +71,27 @@
   [n noun]
   (str n " " noun (when (not= "1" (str n)) "s")))
 
+;; --- since the baseline ---------------------------------------------------
+
+(defn- baseline-rows [status entries]
+  (for [{:keys [entry before-score] :as e} entries
+        :let [{:keys [name path line score]} (or entry e)]]
+    [[:td status] [:td [:code name]] [:td path ":" line]
+     (if before-score (num-cell before-score) [:td])
+     (if (= status "fixed") [:td] (num-cell score))]))
+
+(defn- since-baseline-section [{:keys [fixed improved worse new unchanged] :as since}]
+  (when since
+    (section "since-baseline" "Since the baseline"
+             [:p (count fixed) " fixed, " (count improved) " improved, " (count worse) " worse, "
+              (count new) " new, " unchanged " unchanged."]
+             (when (some seq [fixed improved worse new])
+               (table {:class "sortable"} ["Status" "Name" "Where" "Score before" "Score now"]
+                      (concat (baseline-rows "fixed" (map #(assoc % :before-score (:score %)) fixed))
+                              (baseline-rows "worse" worse)
+                              (baseline-rows "improved" improved)
+                              (baseline-rows "new" new)))))))
+
 ;; --- summary and errors ----------------------------------------------------
 
 (defn- summary-rows [summary entries]
@@ -320,9 +341,10 @@
 
 (defn- sections
   "The report's sections, in the Markdown report's order."
-  [{:keys [files summary edges errors queue cleanup lints] :as result} top]
+  [{:keys [files summary edges errors queue cleanup lints since-baseline] :as result} top]
   [(summary-section summary queue)
    (errors-section errors)
+   (since-baseline-section since-baseline)
    (queue-section queue top)
    (hotspots-section result)
    (unusual-section result)
