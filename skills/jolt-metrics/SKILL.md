@@ -77,6 +77,18 @@ forms ──► lint.clj ──► ignore.clj (scanner's markers drop lints/queu
   `comment` are data. New rules go in `default-levels` too (config validates against
   it), and the README's Lint rules table. Run new rules over clj-kondo's own `src`:
   it should stay clean, since clj-kondo lints itself.
+- **Performance lint rules** (`str-accumulation`, `concat-accumulation`,
+  `contains-on-sequential`, `linear-membership`, `copying-pop`, `last-on-vector`,
+  `lazy-into`) are ours, not clj-kondo's, after the AAE knowledge base. Rules that
+  judge a call by its argument go in `pair-rules`, so `unthreaded-rules` also
+  checks them on expanded `->`/`->>` steps. Loop-shaped rules (`copying-pop`,
+  `loop-accumulation`) only look at what `recur` rebinds, so a one-off copy isn't
+  flagged.
+- **`metrics.baseline`** is plain Clojure: `compare-queues` matches queue entries
+  by kind, path and name (not line) and gives `:fixed :improved :worse :new
+  :unchanged`; `with-baseline` attaches it as `:since-baseline`. The CLI reads
+  `--baseline FILE` (an earlier `--format edn` report) and calls it, which keeps
+  `metrics.core` under its efferent-coupling limit.
 - **`metrics.scanner`** returns `:ignores`: `#_:jolt-metrics/ignore` or
   `#_{:jolt-metrics/ignore [rules]}` (and `#_:clj-kondo/ignore`, flagged `:clj-kondo`)
   with the line range of the form after it. **`metrics.ignore/reviewed`** levels the
