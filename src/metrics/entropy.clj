@@ -13,6 +13,13 @@
   precision: 58% of flagged commits were feature work maintainers would want to
   look at, rising to 83% counting removals and porting.
 
+  Median and MAD would be the textbook robust choice, but they don't suit these
+  deltas: an edit moves entropy by hundredths of a bit and a new file by
+  several bits, so the median sits among the edits and every added file looks
+  extreme.  Over the last 500 commits of seven Clojure repositories, mean and
+  standard deviation flagged about 4% of commits; median/MAD flagged up to 32%,
+  on a log scale too, and so did leaving flagged commits out of the baseline.
+
   The same words also give a distribution over the files as they are now.  A
   file's surprisal is how many bits each of its words takes, on average, under
   the word distribution of the rest of the project: the cross-entropy the paper
