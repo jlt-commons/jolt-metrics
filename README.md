@@ -186,7 +186,23 @@ with exit code 2.
 
 | On by default | Off by default |
 |---|---|
-| `redundant-do`, `redundant-let`, `cond-else`, `constant-condition`, `missing-else-branch`, `missing-body-in-when`, `missing-clause-in-try`, `single-operand-comparison`, `single-logical-operand`, `not-empty?`, `inline-def`, `loop-without-recur`, `case-duplicate-test` (error), `earmuffed-var-not-dynamic`, `docstring-blank`, `misplaced-docstring`, `refer-all`, `use`, and at `:info` `redundant-nested-call`, `redundant-str-call`, `redundant-ignore` | `redundant-let-binding`, `if-nil-return`, `if-x-x-y`, `redundant-call`, `redundant-fn-wrapper`, `equals-true`, `equals-false`, `equals-nil`, `plus-one`, `minus-one`, `single-key-in`, `dynamic-var-not-earmuffed`, `def-fn`, `missing-docstring`, `docstring-no-summary`, `docstring-leading-trailing-whitespace`, `unsorted-required-namespaces` |
+| `redundant-do`, `redundant-let`, `cond-else`, `constant-condition`, `missing-else-branch`, `missing-body-in-when`, `missing-clause-in-try`, `single-operand-comparison`, `single-logical-operand`, `not-empty?`, `inline-def`, `loop-without-recur`, `case-duplicate-test` (error), `earmuffed-var-not-dynamic`, `docstring-blank`, `misplaced-docstring`, `refer-all`, `use`, `contains-on-sequential`, and at `:info` `redundant-nested-call`, `redundant-str-call`, `redundant-ignore`, `str-accumulation`, `concat-accumulation`, `copying-pop`, `last-on-vector` | `redundant-let-binding`, `if-nil-return`, `if-x-x-y`, `redundant-call`, `redundant-fn-wrapper`, `equals-true`, `equals-false`, `equals-nil`, `plus-one`, `minus-one`, `single-key-in`, `dynamic-var-not-earmuffed`, `def-fn`, `missing-docstring`, `docstring-no-summary`, `docstring-leading-trailing-whitespace`, `unsorted-required-namespaces`, `linear-membership`, `lazy-into` |
+
+The performance rules aren't clj-kondo's. They come from the
+[Agentic Algorithm Engineering](https://github.com/CHSZLab/AgenticAlgorithmEngineering)
+knowledge base, and each one flags code that does more work than the job needs:
+
+| Rule | Flags | Instead |
+|---|---|---|
+| `str-accumulation` | `(reduce str ...)`, or a `reduce` or `loop` that grows a string with `(str acc ...)`: a copy per step | `clojure.string/join`, `apply str` |
+| `concat-accumulation` | `(reduce concat ...)`, or `(concat acc ...)` in a `reduce` or `loop`: nested lazy seqs that overflow the stack | `into`, `apply concat` |
+| `contains-on-sequential` | `contains?` on a vector or list literal, or on `vec`/`mapv`: it checks indices, not values | a set, or `some` |
+| `linear-membership` | `(some #(= x %) coll)`: a linear search | a set |
+| `copying-pop` | a `loop` that rebinds a vector to `(vec (rest v))`: a full copy per pop | `subvec`, `clojure.lang.PersistentQueue` |
+| `last-on-vector` | `last` on a vector from `vec`, `mapv`, `into []` and the like: it walks from the front | `peek` |
+| `lazy-into` | `(into [] (map f xs))`: a lazy seq made only to be poured out | `(into [] (map f) xs)` |
+
+These also look inside `->` and `->>` pipelines, once the steps are expanded.
 
 clj-kondo resolves every var; these rules match a call's head by name, with a
 `clojure.core/` qualifier removed, so a local that shadows a core name can make

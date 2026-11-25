@@ -156,3 +156,86 @@
   (is (string? (lint/config-problem {:no-such-rule {:level :off}})))
   (is (string? (lint/config-problem {:redundant-do {:level :loud}})))
   (is (string? (lint/config-problem [:redundant-do]))))
+
+;; --- performance -------------------------------------------------------
+
+(deftest str-accumulation
+  (testing "building a string one piece at a time copies it every step"
+    (is (flags? :str-accumulation "(reduce str xs)"))
+    (is (flags? :str-accumulation "(reduce str \"\" xs)"))
+    (is (flags? :str-accumulation "(reduce (fn [acc x] (str acc x \",\")) \"\" xs)"))
+    (is (flags? :str-accumulation "(reduce #(str %1 %2) \"\" xs)"))
+    (is (flags? :str-accumulation "(loop [s \"\" xs xs] (if (seq xs) (recur (str s (first xs)) (rest xs)) s))")))
+  (testing "a string built once is fine"
+    (is (not (flags? :str-accumulation "(apply str xs)")))
+    (is (not (flags? :str-accumulation "(reduce (fn [acc x] (str x acc)) \"\" xs)")))
+    (is (not (flags? :str-accumulation "(loop [s \"\" xs xs] (if (seq xs) (recur (str (first xs)) (rest xs)) s))")))
+    (is (not (flags? :str-accumulation "(loop [s \"\"] (let [f (fn [s] (recur (str s 1)))] s))")))))
+
+(deftest concat-accumulation
+  (testing "concat onto an accumulator nests lazy seqs until the stack overflows"
+    (is (flags? :concat-accumulation "(reduce concat xss)"))
+    (is (flags? :concat-accumulation "(reduce (fn [acc x] (concat acc [x])) [] xs)"))
+    (is (flags? :concat-accumulation "(loop [acc () xs xs] (if (seq xs) (recur (concat acc (f (first xs))) (rest xs)) acc))")))
+  (testing "a single concat is fine"
+    (is (not (flags? :concat-accumulation "(apply concat xss)")))
+    (is (not (flags? :concat-accumulation "(reduce into [] xss)")))))
+
+(deftest contains-on-sequential
+  (testing "contains? on a vector or list asks about indices, not values"
+    (is (flags? :contains-on-sequential "(contains? [:a :b] x)"))
+    (is (flags? :contains-on-sequential "(contains? '(:a :b) x)"))
+    (is (flags? :contains-on-sequential "(contains? (vec xs) x)"))
+    (is (flags? :contains-on-sequential "(-> xs vec (contains? x))")))
+  (testing "sets and maps are what contains? is for"
+    (is (not (flags? :contains-on-sequential "(contains? #{:a :b} x)")))
+    (is (not (flags? :contains-on-sequential "(contains? m x)")))))
+
+(deftest linear-membership
+  (is (flags? :linear-membership "(some #(= x %) xs)"))
+  (is (flags? :linear-membership "(some (fn [y] (= y x)) xs)"))
+  (is (not (flags? :linear-membership "(some #{x} xs)")))
+  (is (not (flags? :linear-membership "(some #(= (:id %) x) xs)")))
+  (testing "a string's .contains is a substring search"
+    (is (not (flags? :linear-membership "(.contains s x)")))))
+
+(deftest copying-pop
+  (testing "rebuilding a loop's vector to drop its head is a copy per pop"
+    (is (flags? :copying-pop "(loop [q [1 2]] (when (seq q) (recur (vec (rest q)))))"))
+    (is (flags? :copying-pop "(loop [q [1 2]] (when (seq q) (recur (vec (next q)))))"))
+    (is (flags? :copying-pop "(loop [q [1 2]] (when (seq q) (recur (into [] (rest q)))))"))
+    (is (flags? :copying-pop "(loop [q [1 2]] (when (seq q) (recur (vec (drop 1 q)))))"))
+    (is (flags? :copying-pop "(loop [q [1 2]] (when (seq q) (recur (->> q rest vec))))"))
+    (is (flags? :copying-pop "(loop [n 0 q [1 2]] (when (seq q) (recur (inc n) (conj (vec (rest q)) n))))")))
+  (testing "a copy made once, or of something else, is fine"
+    (is (not (flags? :copying-pop "(vec (rest q))")))
+    (is (not (flags? :copying-pop "(loop [q [1 2]] (when (seq q) (recur (subvec q 1))))")))
+    (is (not (flags? :copying-pop "(loop [q [1 2] r []] (when (seq q) (recur (vec (rest r)) q)))")))
+    (is (not (flags? :copying-pop "(loop [q [1 2]] (when (seq q) (recur (vec (drop n q)))))")))))
+
+(deftest last-on-vector
+  (is (flags? :last-on-vector "(last (mapv f xs))"))
+  (is (flags? :last-on-vector "(last (vec xs))"))
+  (is (flags? :last-on-vector "(last (into [] xs))"))
+  (is (flags? :last-on-vector "(->> xs (mapv f) last)"))
+  (is (not (flags? :last-on-vector "(last xs)")))
+  (is (not (flags? :last-on-vector "(last (map f xs))")))
+  (is (not (flags? :last-on-vector "(peek (mapv f xs))"))))
+
+(deftest lazy-into
+  (testing "a lazy seq made only to be poured into a collection"
+    (is (flags? :lazy-into "(into [] (map f xs))"))
+    (is (flags? :lazy-into "(into #{} (filter p xs))"))
+    (is (flags? :lazy-into "(->> xs (map f) (into []))")))
+  (testing "the transducer form, or a seq used as is, is fine"
+    (is (not (flags? :lazy-into "(into [] (map f) xs)")))
+    (is (not (flags? :lazy-into "(into [] xs)")))
+    (is (not (flags? :lazy-into "(map f xs)")))))
+
+(deftest performance-rules-have-default-levels
+  (is (= {:str-accumulation :info :concat-accumulation :info
+          :contains-on-sequential :warning :linear-membership :off
+          :copying-pop :info :last-on-vector :info :lazy-into :off}
+         (select-keys lint/default-levels
+                      [:str-accumulation :concat-accumulation :contains-on-sequential
+                       :linear-membership :copying-pop :last-on-vector :lazy-into]))))
