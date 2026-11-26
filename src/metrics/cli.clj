@@ -149,7 +149,9 @@ Prints the report, or writes it to out.
   "The queue of the --format edn report at path, or {:error message}."
   [path]
   (let [result (try (edn/read-string (slurp path)) (catch Exception _ nil))]
-    (if (and (map? result) (vector? (:queue result)))
+    (if (and (map? result) (vector? (:queue result))
+             (every? #(and (map? %) (number? (:score %)) (keyword? (:kind %)) (string? (:path %)))
+                     (:queue result)))
       {:queue (:queue result)}
       {:error (str "--baseline needs a report written with --format edn: " path)})))
 

@@ -239,3 +239,19 @@
          (select-keys lint/default-levels
                       [:str-accumulation :concat-accumulation :contains-on-sequential
                        :linear-membership :copying-pop :last-on-vector :lazy-into]))))
+
+(deftest review-fixes
+  (testing "a threaded into step is reported once"
+    (is (= 1 (count (filter #(= :lazy-into (:rule %)) (found "(-> [] (into (map f xs)))"))))))
+  (testing "an integer key is an index check, which contains? on a vector is for"
+    (is (not (flags? :contains-on-sequential "(contains? [:a :b] 1)")))
+    (is (not (flags? :contains-on-sequential "(contains? (vec xs) 0)"))))
+  (testing "a lazy step over several collections has no transducer form"
+    (is (not (flags? :lazy-into "(into [] (map vector xs ys))"))))
+  (testing "recur in a letfn or reify inside a loop targets them, not the loop"
+    (is (not (flags? :str-accumulation "(loop [s \"\"] (letfn [(g [s] (recur (str s 1)))] (g s)))")))
+    (is (not (flags? :copying-pop "(loop [q [1]] (reify P (m [_ q] (recur (vec (rest q))))))"))))
+  (testing "a pipeline finding is placed at its step"
+    (let [[f] (filter #(= :last-on-vector (:rule %))
+                      (found "(->> xs\n     (map inc)\n     (mapv f)\n     (last))"))]
+      (is (= 4 (:line f))))))

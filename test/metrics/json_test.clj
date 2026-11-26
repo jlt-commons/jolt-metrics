@@ -66,6 +66,6 @@
                (core/analyze-files [["a.clj" (str big "(defn small [x] (inc x))\n")]] {:abstractions false})
                (:queue before))
         since (get (json/report after) "since_baseline")]
-    (is (= #{"fixed" "improved" "worse" "new" "unchanged"} (set (keys since))))
+    (is (= #{"fixed" "improved" "worse" "new" "unchanged" "not_analyzed"} (set (keys since))))
     (is (= 1 (get since "unchanged")))
     (is (= [] (get since "fixed")))))

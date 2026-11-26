@@ -127,15 +127,19 @@
 
 (defn render-since-baseline
   "What changed in the queue since the baseline run, or nothing without one."
-  [{:keys [fixed improved worse new unchanged] :as since} top]
+  [{:keys [fixed improved worse new unchanged not-analyzed] :as since} top]
   (when since
     (str "## Since the baseline\n\n"
          (count fixed) " fixed, " (count improved) " improved, " (count worse) " worse, "
-         (count new) " new, " unchanged " unchanged.\n"
+         (count new) " new, " unchanged " unchanged."
+         (when (seq not-analyzed)
+           (str " " (count not-analyzed) " in files not analyzed this time, so not judged."))
+         "\n"
          (baseline-group "Fixed" (map named-entry fixed) top)
          (baseline-group "Worse" (map score-move worse) top)
          (baseline-group "Improved" (map score-move improved) top)
          (baseline-group "New" (map named-entry new) top)
+         (baseline-group "In files not analyzed" (map named-entry not-analyzed) top)
          "\n")))
 
 ;; --- hotspots ------------------------------------------------------------

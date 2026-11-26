@@ -396,12 +396,17 @@
           :when (grows? grow f)]
       {:rule rule :message message})))
 
+(def ^:private own-recur-target
+  "Forms whose recur goes back to them, not to a loop around them."
+  '#{fn fn* loop letfn reify deftype defrecord proxy extend-type extend-protocol quote})
+
 (defn- recur-forms
-  "The recur forms of a loop body, leaving out nested fns and loops."
+  "The recur forms of a loop body, leaving out those of nested fns, loops,
+  letfns and method bodies, which recur to themselves."
   [form]
   (cond
     (= 'recur (head form)) [form]
-    (contains? '#{fn fn* loop quote} (head form)) []
+    (contains? own-recur-target (head form)) []
     (coll? form) (mapcat recur-forms (if (seq? form) (rest form) (seq form)))
     :else []))
 
@@ -424,9 +429,13 @@
       (contains? makes-vector (head form))
       (and (= 'into (head form)) (= [] (second form)))))
 
-(defn- contains-on-sequential [form _]
+(defn- contains-on-sequential
+  "contains? asking a vector or list about a value.  An integer key is an index
+  check, which is what contains? on a vector is for."
+  [form _]
   (let [coll (second form)]
     (when (and (= 3 (count form))
+               (not (integer? (nth form 2)))
                (or (vector-call? coll)
                    (= 'list (head coll))
                    (and (= 'quote (head coll)) (seq? (second coll)))))
@@ -500,7 +509,8 @@
 
 (defn- lazy-into [form _]
   (let [arg (nth form 2 nil)]
-    (when (and (= 3 (count form)) (contains? lazy-steps (head arg)) (>= (count arg) 3))
+    ;; (map f xs ys) walks several collections, which no transducer can
+    (when (and (= 3 (count form)) (contains? lazy-steps (head arg)) (= 3 (count arg)))
       (hit :lazy-into
            (str "(into to (" (head arg) " ...)) makes a lazy seq only to pour it out; use the transducer: (into to (" (head arg) " f) coll)")))))
 
@@ -508,11 +518,26 @@
   "The rules that judge a call by its argument, which a threading form hides."
   {'contains? [contains-on-sequential] 'into [lazy-into] 'last [last-on-vector]})
 
-(defn- unthreaded-rules [form ctx]
-  (for [step (unthread form)
+(defn- as-step
+  "A pipeline step as the walker lints it on its own: the threaded value a
+  placeholder, so only what the step holds in full can match."
+  [threading s]
+  (cond
+    (not (seq? s)) (list s 'metrics.lint/threaded)
+    (= '->> threading) (concat s ['metrics.lint/threaded])
+    :else (apply list (first s) 'metrics.lint/threaded (rest s))))
+
+(defn- unthreaded-rules
+  "The pair rules on each expanded step of a pipeline, placed at the step.
+  A rule the step already breaks on its own is the walker's to report."
+  [form ctx]
+  (for [[s step] (map vector (drop 2 form) (unthread form))
         rule (get pair-rules (head step))
-        f (rule step ctx)]
-    f))
+        :let [own (set (map :rule (rule (as-step (head form) s) ctx)))
+              at (when (seq? s) (select-keys (meta s) [:line :column]))]
+        f (rule step ctx)
+        :when (not (contains? own (:rule f)))]
+    (merge f at)))
 
 ;; --- the table ---------------------------------------------------------
 
@@ -588,7 +613,8 @@
   (let [called (as-called form ctx)]
     (for [rule (get rules-by-head (head form))
           f (rule called ctx)]
-      (merge f (select-keys ctx [:line :column])))))
+      ;; a rule may place its finding itself, as unthreaded-rules does
+      (merge (select-keys ctx [:line :column]) f))))
 
 (defn- walk [form ctx]
   (let [here (merge ctx (position form ctx))

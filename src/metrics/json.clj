@@ -148,13 +148,14 @@
 
 (defn- since-baseline
   "What changed in the queue since the baseline, or nil without one."
-  [{:keys [fixed improved worse new unchanged] :as since}]
+  [{:keys [fixed improved worse new unchanged not-analyzed] :as since}]
   (when since
     {"fixed" (mapv baseline-entry fixed)
      "improved" (mapv baseline-move improved)
      "worse" (mapv baseline-move worse)
      "new" (mapv baseline-entry new)
-     "unchanged" unchanged}))
+     "unchanged" unchanged
+     "not_analyzed" (mapv baseline-entry not-analyzed)}))
 
 (defn- lint [{:keys [path line column rule level message]}]
   {"path" path "line" line "column" column "rule" rule "level" level "message" message})

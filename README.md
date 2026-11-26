@@ -111,7 +111,10 @@ jolt-metrics src --baseline before.edn # after: fixed, improved, worse, new
 
 Entries match by kind, path and name, so a definition that moved is still the
 same entry. One that was renamed counts as fixed under its old name and new
-under its new one.
+under its new one, and one an ignore marker now hides counts as fixed. Entries
+from a file the second run couldn't read, or left out, are listed apart as not
+analyzed rather than fixed. Give both runs the same directory argument, since
+paths are compared as written.
 
 Without `--format`, an output file ending in `.md`, `.edn`, `.json`, `.html`,
 `.htm` or `.sarif` (any case) gets that format. Anything else, or no output file, gets

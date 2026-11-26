@@ -78,19 +78,23 @@
         :let [{:keys [name path line score]} (or entry e)]]
     [[:td status] [:td [:code name]] [:td path ":" line]
      (if before-score (num-cell before-score) [:td])
-     (if (= status "fixed") [:td] (num-cell score))]))
+     (if (contains? #{"fixed" "not analyzed"} status) [:td] (num-cell score))]))
 
-(defn- since-baseline-section [{:keys [fixed improved worse new unchanged] :as since}]
+(defn- since-baseline-section [{:keys [fixed improved worse new unchanged not-analyzed] :as since}]
   (when since
     (section "since-baseline" "Since the baseline"
              [:p (count fixed) " fixed, " (count improved) " improved, " (count worse) " worse, "
-              (count new) " new, " unchanged " unchanged."]
-             (when (some seq [fixed improved worse new])
+              (count new) " new, " unchanged " unchanged."
+              (when (seq not-analyzed)
+                (str " " (count not-analyzed) " in files not analyzed this time, so not judged."))]
+             (when (some seq [fixed improved worse new not-analyzed])
                (table {:class "sortable"} ["Status" "Name" "Where" "Score before" "Score now"]
                       (concat (baseline-rows "fixed" (map #(assoc % :before-score (:score %)) fixed))
                               (baseline-rows "worse" worse)
                               (baseline-rows "improved" improved)
-                              (baseline-rows "new" new)))))))
+                              (baseline-rows "new" new)
+                              (baseline-rows "not analyzed"
+                                             (map #(assoc % :before-score (:score %)) not-analyzed))))))))
 
 ;; --- summary and errors ----------------------------------------------------
 

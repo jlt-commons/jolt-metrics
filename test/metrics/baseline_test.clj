@@ -15,7 +15,7 @@
          more))
 
 (deftest an-empty-baseline-makes-everything-new
-  (is (= {:fixed [] :improved [] :worse [] :new [(entry "f" 3.0)] :unchanged 0}
+  (is (= {:fixed [] :improved [] :worse [] :new [(entry "f" 3.0)] :unchanged 0 :not-analyzed []}
          (baseline/compare-queues [] [(entry "f" 3.0)]))))
 
 (deftest entries-match-by-kind-path-and-name-not-line
@@ -43,6 +43,19 @@
   (let [c (baseline/compare-queues [(entry "f" 1.0)] [(entry "f" 3.0)])]
     (is (= [3.0] (map (comp :score :entry) (:worse c))))
     (is (= [1.0] (map :before-score (:worse c))))))
+
+(deftest entries-sharing-a-name-pair-up-in-order
+  (let [c (baseline/compare-queues [(entry "f" 5.0) (entry "f" 3.0)]
+                                   [(entry "f" 5.0 :line 9) (entry "f" 3.0 :line 20)])]
+    (is (= 2 (:unchanged c)))
+    (is (empty? (:worse c)))
+    (is (empty? (:improved c)))))
+
+(deftest entries-of-files-not-analyzed-now-are-not-fixed
+  (let [c (baseline/compare-queues [(entry "f" 3.0) (entry "g" 2.0 :path "b.clj")] []
+                                   #{"b.clj"})]
+    (is (= ["g"] (map :name (:fixed c))))
+    (is (= ["f"] (map :name (:not-analyzed c))))))
 
 (deftest worst-changes-come-first
   (let [c (baseline/compare-queues [(entry "a" 9.0) (entry "b" 9.0) (entry "c" 1.0) (entry "d" 1.0)]
@@ -78,4 +91,17 @@
       (is (zero? exit))
       (is (str/includes? out "1 fixed")))
     (testing "a baseline that can't be read is bad usage"
-      (is (= 2 (:exit (cli/run [dir "--no-git" "--baseline" (str dir "/missing.edn")])))))))
+      (is (= 2 (:exit (cli/run [dir "--no-git" "--baseline" (str dir "/missing.edn")])))))
+    (testing "so is one whose entries aren't queue entries"
+      (let [bad (str (fs/create-temp-dir) "/bad.edn")]
+        (spit bad (pr-str {:queue [{:kind :function :path "a.clj" :name "big"}]}))
+        (is (= 2 (:exit (cli/run [dir "--no-git" "--no-abstractions" "--baseline" bad]))))))))
+
+(deftest a-file-that-no-longer-parses-is-not-fixed
+  (let [before (core/analyze-files [["a.clj" branchy]] {:abstractions false})
+        after (baseline/with-baseline
+               (core/analyze-files [["a.clj" "(ns a)\n(defn big [x] (f x)"]] {:abstractions false})
+               (:queue before))]
+    (is (empty? (get-in after [:since-baseline :fixed])))
+    (is (= ["big"] (map :name (get-in after [:since-baseline :not-analyzed]))))
+    (is (str/includes? (report/render after {:top 25}) "not analyzed"))))
