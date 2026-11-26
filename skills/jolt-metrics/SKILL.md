@@ -4,10 +4,12 @@ description: >-
   Use when working in the jolt-metrics library: a Jolt code-metrics library
   that computes LOC, cyclomatic and cognitive complexity, Halstead metrics,
   the maintainability index, architecture coupling and unusual commits over
-  Clojure/Jolt and Scheme source, and renders a report led by a ranked refactoring queue. Covers adding
-  or changing a metric (write its writ spec first, then the pure implementation),
-  the normalized model, the reader and scanner, and the coupling, queue and
-  report pipeline.
+  Clojure/Jolt and Scheme source, lints for idioms, likely bugs and needless
+  work, and renders a report led by a ranked refactoring queue, which
+  --baseline compares with an earlier run. Covers adding or changing a metric
+  (write its writ spec first, then the pure implementation), adding a lint
+  rule, the normalized model, the reader and scanner, and the coupling, queue,
+  baseline and report pipeline.
 ---
 
 # jolt-metrics
@@ -85,10 +87,17 @@ forms ──► lint.clj ──► ignore.clj (scanner's markers drop lints/queu
   `loop-accumulation`) only look at what `recur` rebinds, so a one-off copy isn't
   flagged.
 - **`metrics.baseline`** is plain Clojure: `compare-queues` matches queue entries
-  by kind, path and name (not line) and gives `:fixed :improved :worse :new
-  :unchanged`; `with-baseline` attaches it as `:since-baseline`. The CLI reads
-  `--baseline FILE` (an earlier `--format edn` report) and calls it, which keeps
-  `metrics.core` under its efferent-coupling limit.
+  by kind, path, name and order among same-named entries (not line) and gives
+  `:fixed :improved :worse :new :unchanged :not-analyzed`; an entry whose file
+  the later run didn't read is `:not-analyzed`, never `:fixed`. `with-baseline`
+  attaches it as `:since-baseline`, and Markdown, JSON (`since_baseline`) and
+  HTML render it. The CLI reads `--baseline FILE` (an earlier `--format edn`
+  report), checks its entries, and calls it, which keeps `metrics.core` under
+  its efferent-coupling limit.
+- **Kept on evidence**: unusual-change z-scores stay mean/SD and the file index
+  stays an arithmetic mean. Median/MAD and a geometric mean were measured on
+  real repositories and did worse (see the docstrings in `metrics.entropy` and
+  `metrics.core/file-index`); don't swap them without new data.
 - **`metrics.scanner`** returns `:ignores`: `#_:jolt-metrics/ignore` or
   `#_{:jolt-metrics/ignore [rules]}` (and `#_:clj-kondo/ignore`, flagged `:clj-kondo`)
   with the line range of the form after it. **`metrics.ignore/reviewed`** levels the
@@ -173,8 +182,8 @@ are switches: see the `tree-builders` in `metrics.reader`.
 - `jolt -M:test` — run all writ specs + reader tests; `-M:test:dev` swaps in a
   sibling `../writ` checkout.
 - `jolt -m metrics.cli <dir> [out] [--format md|edn|json|html|sarif] [--top N] [--days N]
-  [--commits N] [--no-git] [--no-gitignore] [--no-abstractions] [--exclude GLOB] [--config FILE]` — the
-  report; without `--format`, out's extension picks it.
+  [--commits N] [--no-git] [--no-gitignore] [--no-abstractions] [--exclude GLOB] [--config FILE]
+  [--baseline FILE]` — the report; without `--format`, out's extension picks it.
 
 `self_test` holds `src` to its own thresholds (20 lines, 4 params, cyclomatic 10,
 nesting 3, efferent coupling 19 for a file) and to its own lint rules at default
