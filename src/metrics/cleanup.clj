@@ -1,11 +1,13 @@
 (ns metrics.cleanup
   "Cleanup candidates: requires and functions nothing seems to use.
 
-  Reference counting goes by name and is deliberately conservative: any symbol of
-  that name anywhere counts as a use, so a candidate really has no mention in the
-  analyzed files.  It can't see lookups built at runtime or callers outside them,
-  so a public function listed here may still be API; a project names its API
-  namespaces to keep them off the list."
+  Where the call graph marked a function :referenced? (Clojure, through
+  jolt-lsp), that decides: only a reference resolved to the var counts, so a
+  local or another namespace's var of the same name doesn't hide it.  Elsewhere
+  counting goes by name and is deliberately conservative: any symbol of that
+  name counts as a use.  Neither can see lookups built at runtime or callers
+  outside the analyzed files, so a public function listed here may still be API;
+  a project names its API namespaces to keep them off the list."
   (:require [metrics.paths :as paths]
             [clojure.string :as str]))
 
@@ -13,6 +15,16 @@
   "How many mentions of f's name lie outside its own definition."
   [symbols f]
   (- (get symbols (:name f) 0) (:self-refs f 0)))
+
+(defn- unreferenced?
+  "Does nothing outside f refer to it?  Resolved references when the call graph
+  has them, plus mentions of its name in unindexed, the symbol counts of files
+  it can't see into (Scheme, whose runtime calls Clojure names); else mentions
+  of its name among symbols."
+  [symbols unindexed f]
+  (if (contains? f :referenced?)
+    (and (not (:referenced? f)) (zero? (get unindexed (:name f) 0)))
+    (<= (other-references symbols f) 0)))
 
 (defn- entry-point? [f]
   (= \- (first (:name f))))
@@ -32,7 +44,7 @@
   [files]
   (vec (for [file files
              f (candidates file true)
-             :when (<= (other-references (:symbols file) f) 0)]
+             :when (unreferenced? (:symbols file) {} f)]
          (function-entry file f))))
 
 (defn- namespace-pattern
@@ -60,12 +72,13 @@
   file that opts call API (see api-file?) is called from outside, so it has none."
   ([files] (unused-public files nil))
   ([files opts]
-   (let [symbols (apply merge-with + {} (map :symbols files))]
+   (let [symbols (apply merge-with + {} (map :symbols files))
+         unindexed (apply merge-with + {} (map :symbols (remove :index-analysis files)))]
      (vec (for [file (filter :unused-public? files)
                 :when (not (api-file? opts file))
                 f (candidates file false)
                 :when (and (not (entry-point? f))
-                           (<= (other-references symbols f) 0))]
+                           (unreferenced? symbols unindexed f))]
             (function-entry file f))))))
 
 (defn- refers-in-use?
