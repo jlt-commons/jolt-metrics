@@ -151,6 +151,11 @@ history. Outside a repository, or without git, every file is read. Nothing else
 is excluded by default, so tracked vendored and generated code counts until you
 exclude it.
 
+An excluded Clojure file is still read for what it refers to, so vendored code
+that calls one of your functions keeps it off the unused lists, but it gets no
+findings, scores or call-graph edges of its own. What git ignores isn't read at
+all.
+
 Files under `:test-paths` (default `test` and `tests`, as a directory at any
 depth, or a glob) are measured but never queued or called unused.
 
@@ -278,9 +283,15 @@ since clj-kondo may need it for rules of its own.
     when a bare symbol of its name resolves to nothing (a writ spec's laws), or
     when its full `ns/name` is written, quoted or not, so a local or another
     namespace's function of the same name doesn't hide it. A name mentioned in
-    Scheme also counts, and Scheme's own functions go by name. None of this sees
-    runtime lookups by computed name or outside callers, so check public
-    functions before removing them, and list your API namespaces in the config.
+    Scheme also counts, and Scheme's own functions go by name. Uses from outside
+    the analyzed source count too: the macros and hook functions a clj-kondo
+    config's `:hooks` names (`:analyze-call` and `:macroexpand`, in
+    `.clj-kondo/**/config.edn` and `clj-kondo.exports/**/config.edn`), the code
+    in a `bb.edn` or `deps.edn` `:tasks` map (with `babashka.tasks` referred and
+    the tasks' `:requires` in scope), and references from excluded Clojure files.
+    None of this sees runtime lookups by computed name or callers outside the
+    directory, so check public functions before removing them, and list your
+    API namespaces in the config.
 11. [Lint findings](#lint-rules): idioms with a simpler form, likely bugs and
     needless work, each with its rule and level.
 12. Files and Architecture: per-file numbers, coupling and dependencies.

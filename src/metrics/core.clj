@@ -408,13 +408,15 @@
   commit count over the last :days days, it also has churn: hotspots, and a queue
   that puts them first.  With :history, each commit's entropy change as
   metrics.git/history gives it, it has the unusual ones.  :thresholds are a
-  project's own limits, as metrics.thresholds takes them."
+  project's own limits, as metrics.thresholds takes them, and :outside where to
+  look for references from outside the files (see metrics.callgraph/annotate)."
   [loaders {:keys [changes days root test-paths] :as opts}]
   (let [{:keys [files errors]} (load-all loaders)
         edges (dependency-edges files root)
         files (assoc-surprisal
                (callgraph/annotate
-                (annotated-files files edges changes #(mark-test-file % root test-paths))))
+                (annotated-files files edges changes #(mark-test-file % root test-paths))
+                (:outside opts)))
         limits (thresholds/with-defaults (:thresholds opts))
         result-files (mapv public-file files)
         findings (reviewed limits files opts)]
@@ -444,16 +446,21 @@
   "Analyze every source file of a language we know under a directory, leaving out
   those :exclude globs match, those :ignored lists (paths relative to dir, as
   metrics.git/ignored gives them) and directories named like one, such as a
-  checkout called deps.clj; other opts as for analyze-files."
+  checkout called deps.clj; other opts as for analyze-files.  What the excluded
+  files and the project's clj-kondo and task configs refer to still counts as
+  a use (see metrics.references), but what :ignored lists isn't read at all."
   ([dir] (analyze-dir dir nil))
   ([dir {:keys [exclude ignored] :as opts}]
-   (let [left-out? #(let [rel (paths/relative dir %)]
-                      (or (paths/excluded? exclude rel) (paths/ignored? ignored rel)))
-         paths (->> (language/globs)
-                    (mapcat #(fs/glob dir %))
-                    (map str)
-                    (filter language/of)
-                    (filter fs/regular-file?)
-                    (remove left-out?)
-                    distinct)]
-     (analyze-loaded (for [p paths] [p #(slurp p)]) (assoc opts :root dir)))))
+   (let [ignored? #(paths/ignored? ignored (paths/relative dir %))
+         excluded? #(paths/excluded? exclude (paths/relative dir %))
+         sources (->> (language/globs)
+                      (mapcat #(fs/glob dir %))
+                      (map str)
+                      (filter language/of)
+                      (filter fs/regular-file?)
+                      (remove ignored?)
+                      distinct
+                      (group-by excluded?))
+         outside {:root dir :excluded (get sources true) :ignored? ignored?}]
+     (analyze-loaded (for [p (get sources false)] [p #(slurp p)])
+                     (assoc opts :root dir :outside outside)))))
