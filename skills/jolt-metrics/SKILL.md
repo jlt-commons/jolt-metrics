@@ -67,7 +67,11 @@ forms ──► lint.clj ──► ignore.clj (scanner's markers drop lints/queu
 - **`metrics.callgraph`** is plain Clojure glue over jolt-lsp: an adapter's optional
   `:index` fn (only Clojure's has one) turns source into a jolt-lsp analysis, and
   `annotate` builds the index from those analyses alone (`db/build-from-analyses`,
-  tests left out) and puts `:fan-in`, `:fan-out` and `:reach` on each function.
+  tests indexed but left out of the graph) and puts `:fan-in`, `:fan-out`,
+  `:reach` and `:referenced?` on each function. `metrics.cleanup` goes by
+  `:referenced?` where it's set (a resolved reference, an unresolved bare name,
+  or the `ns/name` written out, from `metrics.mentions`), so a same-named local
+  or var elsewhere can't hide an unused function (#25).
   The counting and the queue weight (`reach-factor`) live in the writ-checked
   `metrics.calls`. Methods, helpers and Scheme get nil.
 - **`metrics.lint`** is plain Clojure with behaviour tests (`lint_test.clj`): clj-kondo's

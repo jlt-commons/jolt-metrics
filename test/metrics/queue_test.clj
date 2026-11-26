@@ -197,6 +197,34 @@
                                          "b.clj" "(ns b (:require [a :as x])) (defn go [] (x/used))")]
     (is (= #{"dead" "go"} (set (map :name unused-public))))))
 
+(deftest a-local-of-the-same-name-is-not-a-use
+  (testing "a let local named like a public var in another namespace (#25)"
+    (is (= ["init"] (map :name (:unused-public
+                                (cleanup "src/a/lib.clj" "(ns a.lib)\n(defn init [] :never-called)\n"
+                                         "src/a/main.clj" "(ns a.main)\n(defn -main [& _]\n  (let [init 1] (println init)))\n"))))))
+  (testing "a same-named function in another namespace"
+    (is (= #{"init"} (set (map :name (filter #(= "a.clj" (:path %))
+                                             (:unused-public
+                                              (cleanup "a.clj" "(ns a) (defn init [] 1)"
+                                                       "b.clj" "(ns b) (defn init [] 2) (defn -main [] (init))"))))))))
+  (testing "a local named like a private function"
+    (is (= ["priv"] (map :name (:unused-private
+                                (cleanup "a.clj" "(ns a) (defn- priv [] 1) (defn go [] (let [priv 2] priv))"))))))
+  (testing "uses that resolve to the var still count"
+    (let [{:keys [unused-public]}
+          (cleanup "a.clj" "(ns a) (defn via-macro [] 1) (defmacro m [] `(via-macro)) (defn in-map [] 2) (def table {:f in-map}) (defn referred [] 3)"
+                   "b.clj" "(ns b (:require [a :as x :refer [referred]])) (defn -main [] (x/m) (referred) x/table)")]
+      (is (empty? unused-public)
+          "via-macro through m's template, in-map through table, referred, and m and table from b")))
+  (testing "a quoted qualified symbol, as requiring-resolve takes, is a use"
+    (is (empty? (:unused-public
+                 (cleanup "a.clj" "(ns a) (defn late [] 1)"
+                          "b.clj" "(ns b) (defn -main [] ((requiring-resolve 'a/late)))")))))
+  (testing "a bare name nothing resolves, as in a writ spec's laws, is a use"
+    (is (empty? (:unused-public
+                 (cleanup "a.clj" "(ns a) (defn f [] 1)"
+                          "test/a_spec.clj" "(ns a-spec (:require [writ.spec :refer [spec law]])) (spec a {}) (law ok (= 1 (f)))"))))))
+
 (deftest entry-points-and-other-kinds-are-not-unused
   (let [{:keys [unused-public]} (cleanup "a.clj" "(ns a) (defn -main [] 1) (defmethod m :a [x] 1) (deftest t 1) (defrecord R [] P (n [_] 1))")]
     (is (empty? unused-public))))

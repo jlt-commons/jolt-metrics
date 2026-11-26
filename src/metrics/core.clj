@@ -140,7 +140,7 @@
   "What a file is, apart from its scores."
   [path lang model]
   (merge
-   (select-keys model [:libspecs :symbols :qualifiers :load-paths])
+   (select-keys model [:libspecs :symbols :qualifiers :qualified-symbols :load-paths])
    {:path path
     :namespace (some-> (:namespace model) str)
     :language (:id lang)
@@ -272,9 +272,9 @@
   "A file's metrics without what only the cleanup and queue passes needed."
   [file]
   (-> file
-      (dissoc :symbols :qualifiers :libspecs :unused-public? :load-paths :word-counts
-              :index-analysis :lints :ignores)
-      (update :functions (fn [fns] (mapv #(dissoc % :self-refs :tokens :param-vectors :body) fns)))))
+      (dissoc :symbols :qualifiers :qualified-symbols :libspecs :unused-public? :load-paths
+              :word-counts :index-analysis :lints :ignores)
+      (update :functions (fn [fns] (mapv #(dissoc % :self-refs :tokens :param-vectors :body :referenced?) fns)))))
 
 (defn- near-duplicates
   "The pairs of definitions, tests aside, that are near-copies of each other."

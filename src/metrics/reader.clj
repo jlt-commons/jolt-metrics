@@ -19,7 +19,8 @@
   cond is an if/else-if chain and a cond-> a series of ifs; an else-if and a logical
   operator run add a flat 1; try adds nothing; a closure (fn, letfn, reify, proxy)
   adds nothing but nests what it holds.  A letfn's functions are named helpers,
-  measured as units of their own.")
+  measured as units of their own."
+  (:require [metrics.mentions :as mentions]))
 
 ;; --- reading -------------------------------------------------------------
 
@@ -27,9 +28,7 @@
   "The namespace source is read in, so that nothing resolves against the caller's."
   'metrics.read-scratch)
 
-(def ^:private alias-placeholder
-  "What an auto-resolved alias a resolves to is this followed by a."
-  "metrics.read-alias.")
+(def ^:private alias-placeholder mentions/alias-placeholder)
 
 (defn- reading-ns
   "The scratch namespace, with every alias source auto-resolves (`::a/kw`, `#::a{}`) bound
@@ -653,33 +652,6 @@
 
 ;; --- what a file mentions -------------------------------------------------
 
-(defn- atoms [form]
-  (remove coll? (tree-seq coll? seq form)))
-
-(defn- symbol-counts
-  "How many times each symbol name occurs in forms, whatever its namespace."
-  [forms]
-  (frequencies (map name (filter symbol? (mapcat atoms forms)))))
-
-(defn- alias-qualifier
-  "The alias a placeholder namespace stands for, or nil if it is not one."
-  [ns-name]
-  (when (and ns-name (.startsWith ns-name alias-placeholder))
-    (subs ns-name (count alias-placeholder))))
-
-(defn- qualifiers
-  "The namespaces and aliases forms refer through: symbol qualifiers as written,
-  and auto-resolved aliases, which read to a placeholder.  A keyword with a plain
-  :x/y namespace has nothing to do with an alias x."
-  [forms]
-  (set
-   (keep (fn [a]
-           (cond
-             (symbol? a) (or (alias-qualifier (namespace a)) (namespace a))
-             (keyword? a) (alias-qualifier (namespace a))
-             :else nil))
-         (mapcat atoms forms))))
-
 ;; --- the whole file ------------------------------------------------------
 
 (defn- top-level-code
@@ -696,7 +668,7 @@
   (let [body (:body f)
         tokens (reduce halstead* {:operators [] :operands []} body)]
     (assoc (select-keys f [:name :kind :line :column :params :param-vectors :body :private :helpers])
-           :self-refs (get (symbol-counts [(:form f)]) (:name f) 0)
+           :self-refs (get (mentions/symbol-counts [(:form f)]) (:name f) 0)
            :lloc (reduce + 0 (map form-count body))
            :decision-kinds (mapcat decision-kinds body)
            :flow (seq-tree body)
@@ -720,8 +692,9 @@
     (merge
      (select-keys deps [:namespace :imports :libspecs :load-paths])
      {:path path
-      :symbols (symbol-counts code)
-      :qualifiers (qualifiers code)
+      :symbols (mentions/symbol-counts code)
+      :qualifiers (mentions/qualifiers code)
+      :qualified-symbols (mentions/qualified-symbols code)
       :functions (map function-model (functions forms))
       :top-level-decision-kinds (mapcat decision-kinds top-code)
       :top-level-flow (seq-tree top-code)})))

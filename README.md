@@ -273,8 +273,13 @@ since clj-kondo may need it for rules of its own.
    function could replace, with holes where the uses differ, most saving first.
 10. Cleanup candidates: unused requires, and functions nothing mentions. A
     require counts as used when anything it brings in is, so an idle alias next
-    to a used `:refer` isn't listed, but unused referred names are. Matching is
-    by name and can't see runtime lookups or outside callers, so check public
+    to a used `:refer` isn't listed, but unused referred names are. In Clojure a
+    function counts as used when a reference resolves to it (through jolt-lsp),
+    when a bare symbol of its name resolves to nothing (a writ spec's laws), or
+    when its full `ns/name` is written, quoted or not, so a local or another
+    namespace's function of the same name doesn't hide it. A name mentioned in
+    Scheme also counts, and Scheme's own functions go by name. None of this sees
+    runtime lookups by computed name or outside callers, so check public
     functions before removing them, and list your API namespaces in the config.
 11. [Lint findings](#lint-rules): idioms with a simpler form, likely bugs and
     needless work, each with its rule and level.
