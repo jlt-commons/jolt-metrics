@@ -35,7 +35,11 @@
    :missing-docstring :off :docstring-blank :warning :docstring-no-summary :off
    :docstring-leading-trailing-whitespace :off :misplaced-docstring :warning
    :refer-all :warning :use :warning :unsorted-required-namespaces :off
-   :redundant-ignore :info})
+   :redundant-ignore :info
+   ;; ours, not clj-kondo's: work that grows faster than it needs to
+   :str-accumulation :info :concat-accumulation :info
+   :contains-on-sequential :warning :linear-membership :off
+   :copying-pop :info :last-on-vector :info :lazy-into :off})
 
 (def levels
   "What a rule's :level can be."
@@ -359,6 +363,182 @@
 (defn- top-level-use [_ _]
   (hit :use "use :require with alias or :refer"))
 
+;; --- performance -------------------------------------------------------
+;; Not clj-kondo's: shapes whose cost grows faster than the work needs, after
+;; the Agentic Algorithm Engineering knowledge base (string building, membership
+;; tests, queues, lazy pipelines).  Each looks at a call and its argument, so a
+;; threading form's steps are checked again once unthreaded (unthreaded-rules).
+
+(defn- fn-shape
+  "The params and last body form of a single-arity fn or fn literal, or nil."
+  [form]
+  (when (contains? '#{fn fn*} (head form))
+    (let [more (if (symbol? (second form)) (drop 2 form) (rest form))
+          [params & body] more]
+      (when (and (vector? params) (seq body))
+        [params (last body)]))))
+
+(defn- grows?
+  "Does f, the reducing fn of a reduce, build its result by calling grow on the
+  accumulator: grow itself, or a fn whose result is (grow acc ...)?"
+  [grow f]
+  (or (= grow f)
+      (let [[params body] (fn-shape f)]
+        (boolean (and (seq params) (= grow (head body)) (= (first params) (second body)))))))
+
+(def ^:private accumulations
+  {'str [:str-accumulation "Building a string piece by piece copies it every step; use clojure.string/join, apply str or a StringBuilder"]
+   'concat [:concat-accumulation "concat onto an accumulator nests lazy seqs and can overflow the stack; use into or a vector"]})
+
+(defn- reduce-accumulation [form _]
+  (let [f (second form)]
+    (for [[grow [rule message]] accumulations
+          :when (grows? grow f)]
+      {:rule rule :message message})))
+
+(def ^:private own-recur-target
+  "Forms whose recur goes back to them, not to a loop around them."
+  '#{fn fn* loop letfn reify deftype defrecord proxy extend-type extend-protocol quote})
+
+(defn- recur-forms
+  "The recur forms of a loop body, leaving out those of nested fns, loops,
+  letfns and method bodies, which recur to themselves."
+  [form]
+  (cond
+    (= 'recur (head form)) [form]
+    (contains? own-recur-target (head form)) []
+    (coll? form) (mapcat recur-forms (if (seq? form) (rest form) (seq form)))
+    :else []))
+
+(defn- loop-accumulation [form _]
+  (let [bindings (second form)
+        names (when (vector? bindings) (take-nth 2 bindings))]
+    (distinct
+     (for [r (mapcat recur-forms (drop 2 form))
+           [nm arg] (map vector names (rest r))
+           :let [[rule message] (get accumulations (head arg))]
+           :when (and rule (symbol? nm) (= nm (second arg)))]
+       {:rule rule :message message}))))
+
+(def ^:private makes-vector '#{vec vector mapv filterv subvec})
+
+(defn- vector-call?
+  "Does form make a vector: a literal, a vector-making call or (into [] ...)?"
+  [form]
+  (or (vector? form)
+      (contains? makes-vector (head form))
+      (and (= 'into (head form)) (= [] (second form)))))
+
+(defn- contains-on-sequential
+  "contains? asking a vector or list about a value.  An integer key is an index
+  check, which is what contains? on a vector is for."
+  [form _]
+  (let [coll (second form)]
+    (when (and (= 3 (count form))
+               (not (integer? (nth form 2)))
+               (or (vector-call? coll)
+                   (= 'list (head coll))
+                   (and (= 'quote (head coll)) (seq? (second coll)))))
+      (hit :contains-on-sequential
+           "contains? on a vector or list checks indices, not values; use a set or some"))))
+
+(defn- equals-param?
+  "Is form (= p y) or (= y p), y not p itself?"
+  [p form]
+  (and (= '= (head form)) (= 3 (count form))
+       (let [[_ a b] form]
+         (or (and (= p a) (not= p b)) (and (= p b) (not= p a))))))
+
+(defn- linear-membership [form _]
+  (let [[params body] (fn-shape (second form))]
+    (when (and (= 3 (count form)) (= 1 (count params)) (equals-param? (first params) body))
+      (hit :linear-membership "Membership by linear search; keep the values in a set"))))
+
+(defn- drops-head?
+  "Is form (rest nm), (next nm) or (drop 1 nm)?"
+  [nm form]
+  (or (and (contains? '#{rest next} (head form)) (= [nm] (rest form)))
+      (and (= 'drop (head form)) (= [1 nm] (rest form)))))
+
+(defn- unthread
+  "The forms of a -> or ->> pipeline's steps, each with the steps before it
+  nested inside, as the macro expands them."
+  [form]
+  (let [last? (= '->> (head form))
+        step (fn [acc s]
+               (cond
+                 (not (seq? s)) (list s acc)
+                 last? (concat s [acc])
+                 :else (apply list (first s) acc (rest s))))]
+    (rest (reductions step (second form) (drop 2 form)))))
+
+(defn- unthreaded
+  "form with a -> or ->> pipeline expanded, as the macro would."
+  [form]
+  (if (contains? '#{-> ->>} (head form)) (or (last (unthread form)) form) form))
+
+(defn- copies-without-head?
+  "Is form a vector rebuilt from nm without its first item, or does it build
+  on one: (vec (rest nm)), (into [] (rest nm)), (conj (vec (rest nm)) x)?"
+  [nm form]
+  (let [form (unthreaded form)]
+    (cond
+      (and (= 'vec (head form)) (= 2 (count form))) (drops-head? nm (unthreaded (second form)))
+      (and (= 'into (head form)) (= 3 (count form)) (= [] (second form)))
+      (drops-head? nm (unthreaded (last form)))
+      (contains? '#{conj into} (head form)) (copies-without-head? nm (second form))
+      :else false)))
+
+(defn- copying-pop
+  "A loop that pops a vector by copying it: a recur that rebinds a loop name to
+  the vector rebuilt without its head."
+  [form _]
+  (let [bindings (second form)
+        names (when (vector? bindings) (take-nth 2 bindings))]
+    (when (some (fn [r] (some (fn [[nm arg]] (and (symbol? nm) (copies-without-head? nm arg)))
+                              (map vector names (rest r))))
+                (mapcat recur-forms (drop 2 form)))
+      (hit :copying-pop
+           "Rebuilding a vector to drop its first item copies all of it, every time round the loop; use subvec, or clojure.lang.PersistentQueue for a FIFO"))))
+
+(defn- last-on-vector [form _]
+  (when (and (= 2 (count form)) (vector-call? (second form)))
+    (hit :last-on-vector "last walks a vector from the front; use peek")))
+
+(def ^:private lazy-steps '#{map filter remove keep mapcat take-while drop-while map-indexed})
+
+(defn- lazy-into [form _]
+  (let [arg (nth form 2 nil)]
+    ;; (map f xs ys) walks several collections, which no transducer can
+    (when (and (= 3 (count form)) (contains? lazy-steps (head arg)) (= 3 (count arg)))
+      (hit :lazy-into
+           (str "(into to (" (head arg) " ...)) makes a lazy seq only to pour it out; use the transducer: (into to (" (head arg) " f) coll)")))))
+
+(def ^:private pair-rules
+  "The rules that judge a call by its argument, which a threading form hides."
+  {'contains? [contains-on-sequential] 'into [lazy-into] 'last [last-on-vector]})
+
+(defn- as-step
+  "A pipeline step as the walker lints it on its own: the threaded value a
+  placeholder, so only what the step holds in full can match."
+  [threading s]
+  (cond
+    (not (seq? s)) (list s 'metrics.lint/threaded)
+    (= '->> threading) (concat s ['metrics.lint/threaded])
+    :else (apply list (first s) 'metrics.lint/threaded (rest s))))
+
+(defn- unthreaded-rules
+  "The pair rules on each expanded step of a pipeline, placed at the step.
+  A rule the step already breaks on its own is the walker's to report."
+  [form ctx]
+  (for [[s step] (map vector (drop 2 form) (unthread form))
+        rule (get pair-rules (head step))
+        :let [own (set (map :rule (rule (as-step (head form) s) ctx)))
+              at (when (seq? s) (select-keys (meta s) [:line :column]))]
+        f (rule step ctx)
+        :when (not (contains? own (:rule f)))]
+    (merge f at)))
+
 ;; --- the table ---------------------------------------------------------
 
 (defn- for-heads [heads rule]
@@ -368,10 +548,13 @@
   (merge-with
    into
    {'do [redundant-do] 'let [redundant-let redundant-let-binding]
-    'loop [loop-without-recur] 'try [missing-clause-in-try] 'cond [cond-rules]
+    'loop [loop-without-recur loop-accumulation copying-pop] 'try [missing-clause-in-try] 'cond [cond-rules]
     'case [case-duplicate-test] 'str [redundant-str-call] '= [equals-rules]
     '+ [plus-one] '- [minus-one] 'not [not-empty?] 'ns [ns-rules] 'use [top-level-use]
-    'def [earmuffs def-fn] 'defonce [earmuffs]}
+    'def [earmuffs def-fn] 'defonce [earmuffs]
+    'reduce [reduce-accumulation] 'some [linear-membership]
+    '-> [unthreaded-rules] '->> [unthreaded-rules]}
+   pair-rules
    (for-heads '[if if-not if-let if-some] if-rules)
    (for-heads '[when when-not when-let when-some when-first] missing-body-in-when)
    (for-heads '[= > < >= <= == not=] single-operand-comparison)
@@ -430,7 +613,8 @@
   (let [called (as-called form ctx)]
     (for [rule (get rules-by-head (head form))
           f (rule called ctx)]
-      (merge f (select-keys ctx [:line :column])))))
+      ;; a rule may place its finding itself, as unthreaded-rules does
+      (merge (select-keys ctx [:line :column]) f))))
 
 (defn- walk [form ctx]
   (let [here (merge ctx (position form ctx))

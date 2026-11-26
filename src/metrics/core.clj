@@ -107,7 +107,12 @@
 (defn- file-index
   "A file's index is the original formula: the average volume, complexity and size
   of its definitions, plus its own comment ratio.  Summing them instead would make
-  it a measure of how long the file is."
+  it a measure of how long the file is.
+
+  The averages are arithmetic.  Geometric means of volume and size (which make
+  the index the mean of the definitions' indexes) did no better at ranking files
+  by later churn or bug-fix commits over 268 files in five projects; the worst
+  definition's index did better only because it tracks file size."
   [fns volume locs]
   (let [measured (remove #(zero? (get-in % [:halstead :length])) fns)]
     (when (seq measured)

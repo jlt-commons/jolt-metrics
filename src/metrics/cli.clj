@@ -6,13 +6,15 @@
 
   Exits 2 on bad usage or when <dir> does not exist.  A file that cannot be read
   does not fail the run: the report lists it under `Files not analyzed`."
-  (:require [metrics.config :as config]
+  (:require [metrics.baseline :as baseline]
+            [metrics.config :as config]
             [metrics.core :as core]
             [metrics.git :as git]
             [metrics.html :as html]
             [metrics.json :as json]
             [metrics.report :as report]
             [metrics.sarif :as sarif]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [jolt.fs :as fs]))
 
@@ -35,6 +37,8 @@ Prints the report, or writes it to out.
                     slowest pass
   --exclude GLOB    Leave out matching files, relative to <dir>; can be repeated
   --config FILE     The config file (default <dir>/.jolt-metrics.edn)
+  --baseline FILE   An earlier --format edn report: say what the queue gained
+                    and lost since
   -h, --help        Show this")
 
 (defn- count-value
@@ -62,7 +66,8 @@ Prints the report, or writes it to out.
    "--commits" {:key :commits :parse count-value :error "--commits takes a number"}
    "--top" {:key :top :parse count-value :error "--top takes a number"}
    "--exclude" {:key :exclude :parse identity :many true :error "--exclude takes a glob"}
-   "--config" {:key :config :parse identity :error "--config takes a file"}})
+   "--config" {:key :config :parse identity :error "--config takes a file"}
+   "--baseline" {:key :baseline :parse identity :error "--baseline takes a file"}})
 
 (def ^:private off-flags
   "The flags that turn something off, and the option each sets to false."
@@ -133,25 +138,45 @@ Prints the report, or writes it to out.
 (defn- report
   "Run the analysis and put the result where it was asked to go."
   [dir out project-config opts]
-  (let [text (render-result (analyze dir project-config opts) opts out)]
+  (let [result (baseline/with-baseline (analyze dir project-config opts) (:baseline-queue opts))
+        text (render-result result opts out)]
     (if out
       (do (spit out text)
           {:exit 0 :out (str "wrote " out)})
       {:exit 0 :out text})))
 
+(defn- read-baseline
+  "The queue of the --format edn report at path, or {:error message}."
+  [path]
+  (let [result (try (edn/read-string (slurp path)) (catch Exception _ nil))]
+    (if (and (map? result) (vector? (:queue result))
+             (every? #(and (map? %) (number? (:score %)) (keyword? (:kind %)) (string? (:path %)))
+                     (:queue result)))
+      {:queue (:queue result)}
+      {:error (str "--baseline needs a report written with --format edn: " path)})))
+
+(defn- problem
+  "Why the arguments can't be acted on, as a result, or nil."
+  [{:keys [error paths]} dir project-config before]
+  (cond
+    error (bad-usage error)
+    (:error before) (bad-usage (:error before))
+    (> (count paths) 2) (bad-usage "at most a directory and an output file")
+    (not (fs/directory? dir)) {:exit 2 :err (str "not a directory: " dir)}
+    (:error project-config) {:exit 2 :err (:error project-config)}
+    :else nil))
+
 (defn run
   "Do the work of -main; returns {:exit n, :out text, :err text}."
   [args]
-  (let [{:keys [error help paths config] :as opts} (parse-args args)
+  (let [{:keys [error help paths config baseline] :as opts} (parse-args args)
         dir (or (first paths) ".")
-        project-config (when-not (or help error) (config/load-config dir config))]
+        project-config (when-not (or help error) (config/load-config dir config))
+        before (when (and baseline (not (or help error))) (read-baseline baseline))]
     (cond
       help {:exit 0 :out usage}
-      error (bad-usage error)
-      (> (count paths) 2) (bad-usage "at most a directory and an output file")
-      (not (fs/directory? dir)) {:exit 2 :err (str "not a directory: " dir)}
-      (:error project-config) {:exit 2 :err (:error project-config)}
-      :else (report dir (second paths) project-config opts))))
+      :else (or (problem opts dir project-config before)
+                (report dir (second paths) project-config (assoc opts :baseline-queue (:queue before)))))))
 
 (defn -main [& args]
   (let [{:keys [exit out err]} (run args)]

@@ -7,8 +7,8 @@
  ;; the index behind the call-graph metrics: resolved references between vars
  :deps {io.github.jlt-commons/jolt-lsp
         {:git/url "https://github.com/jlt-commons/jolt-lsp"
-         :git/tag "v0.2.1"
-         :git/sha "3c47a5be833c8263a132466ce53eb87e9f62415e"}}
+         :git/tag "v0.6.1"
+         :git/sha "86f85aa8ce7c88456fb8d13bf1bfc843260faea4"}}
 
  :tasks
  {dist  {:doc "build the standalone jolt-lsp binary"
@@ -18,7 +18,8 @@
  {:test {:extra-paths ["test"]
          :extra-deps  {io.github.jlt-commons/writ
                        {:git/url "https://github.com/jlt-commons/writ"
-                        :git/sha "11ea31dfd4f261332df3b227c37c962e30eefb4e"}}
+                        :git/tag "v0.1.16"
+                        :git/sha "4619c7a8144b4214072f47a5cec1f15579acabe7"}}
          :main-opts   ["-m" "metrics.runner"]}
   ;; a writ checkout next to this one (../writ), for iterating on specs
   ;; without a fetch: jolt -M:test:dev

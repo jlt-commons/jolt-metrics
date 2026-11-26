@@ -2,6 +2,7 @@
   "The HTML report: one self-contained page, escaped, readable without its script."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [metrics.baseline :as baseline]
             [metrics.core :as core]
             [metrics.html :as html]))
 
@@ -57,3 +58,16 @@
         p (page [["a.clj" (str "(ns a)\n(defn f [x]\n" body "  x)")]])]
     (is (str/includes? p "1 param,"))
     (is (not (str/includes? p "1 params")))))
+
+(deftest it-says-what-changed-since-the-baseline
+  (let [big (str "(ns a)\n(defn big [x]\n  (cond\n"
+                 (apply str (for [i (range 25)] (str "    (= x " i ") (f" i " x)\n")))
+                 "    :else nil))\n")
+        before (core/analyze-files [["a.clj" big]] {:abstractions false})
+        after (baseline/with-baseline
+               (core/analyze-files [["a.clj" "(ns a)\n(defn big [x] (f x))\n"]] {:abstractions false})
+               (:queue before))
+        p (html/render after)]
+    (is (str/includes? p "<section id=\"since-baseline\""))
+    (is (str/includes? p "1 fixed"))
+    (is (not (str/includes? (html/render before) "<section id=\"since-baseline\"")))))

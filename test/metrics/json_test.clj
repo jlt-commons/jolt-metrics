@@ -3,13 +3,15 @@
   (:require [clojure.data.json]
             [clojure.string]
             [clojure.test :refer [deftest is]]
+            [metrics.baseline :as baseline]
             [metrics.core :as core]
             [metrics.json :as json]))
 
 (deftest the-report-has-the-lean-shape
   (let [r (json/report (core/analyze-files [["a.clj" "(ns a) (defn f [x] (if x 1 2))"]]))]
     (is (= #{"tool" "schema_version" "summary" "findings" "hotspots" "unusual_changes" "unusual_files" "duplicates" "abstractions" "thresholds" "cleanup"
-             "lints" "errors" "files" "dependencies"} (set (keys r))))
+             "lints" "errors" "files" "dependencies" "since_baseline"} (set (keys r))))
+    (is (nil? (get r "since_baseline")))
     (is (= "jolt-metrics" (get r "tool")))
     (is (= 1 (get r "schema_version")))
     (is (= ["a.clj"] (map #(get % "path") (get r "files"))))
@@ -54,3 +56,16 @@
 (deftest paths-keep-their-slashes
   (is (clojure.string/includes? (json/render (core/analyze-files [["src/a.clj" "(ns a)"]]))
                                 "\"path\":\"src/a.clj\"")))
+
+(deftest the-report-says-what-changed-since-the-baseline
+  (let [big (str "(ns a)\n(defn big [x]\n  (cond\n"
+                 (apply str (for [i (range 25)] (str "    (= x " i ") (f" i " x)\n")))
+                 "    :else nil))\n")
+        before (core/analyze-files [["a.clj" big]] {:abstractions false})
+        after (baseline/with-baseline
+               (core/analyze-files [["a.clj" (str big "(defn small [x] (inc x))\n")]] {:abstractions false})
+               (:queue before))
+        since (get (json/report after) "since_baseline")]
+    (is (= #{"fixed" "improved" "worse" "new" "unchanged" "not_analyzed"} (set (keys since))))
+    (is (= 1 (get since "unchanged")))
+    (is (= [] (get since "fixed")))))
