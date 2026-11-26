@@ -23,7 +23,8 @@ refactoring queue: what to clean up first, and why.
 | Entropy / surprisal | `metrics.entropy` | a file's word entropy, and how unexpected its words are given the rest of the project |
 | Compressed size / redundancy | `metrics.compression` | an upper bound on a definition's or file's Kolmogorov complexity, and how much of a file is repetition |
 | Near-duplicates | `metrics.compression` | pairs of definitions whose normalized compression distance says one is nearly a copy of the other |
-| Lint findings | `metrics.lint` | idioms with a simpler form and likely bugs, after [clj-kondo](https://github.com/clj-kondo/clj-kondo)'s rules (Clojure only) |
+| Lint findings | `metrics.lint` | idioms with a simpler form and likely bugs, after [clj-kondo](https://github.com/clj-kondo/clj-kondo)'s rules, and code that does more work than it needs to (Clojure only) |
+| Since the baseline | `metrics.baseline` | what a refactor changed: the queue entries fixed, improved, made worse or added since an earlier run |
 | Abstraction opportunities | `metrics.abstraction` | code shapes that recur often enough for one function to replace them, with their parameters and what extracting them saves |
 
 ## Usage
@@ -211,13 +212,15 @@ knowledge base, and each one flags code that does more work than the job needs:
 |---|---|---|
 | `str-accumulation` | `(reduce str ...)`, or a `reduce` or `loop` that grows a string with `(str acc ...)`: a copy per step | `clojure.string/join`, `apply str` |
 | `concat-accumulation` | `(reduce concat ...)`, or `(concat acc ...)` in a `reduce` or `loop`: nested lazy seqs that overflow the stack | `into`, `apply concat` |
-| `contains-on-sequential` | `contains?` on a vector or list literal, or on `vec`/`mapv`: it checks indices, not values | a set, or `some` |
+| `contains-on-sequential` | `contains?` with a non-integer key on a vector or list literal, or on `vec`/`mapv`: it checks indices, not values. An integer key is an index check and isn't flagged | a set, or `some` |
 | `linear-membership` | `(some #(= x %) coll)`: a linear search | a set |
 | `copying-pop` | a `loop` that rebinds a vector to `(vec (rest v))`: a full copy per pop | `subvec`, `clojure.lang.PersistentQueue` |
 | `last-on-vector` | `last` on a vector from `vec`, `mapv`, `into []` and the like: it walks from the front | `peek` |
-| `lazy-into` | `(into [] (map f xs))`: a lazy seq made only to be poured out | `(into [] (map f) xs)` |
+| `lazy-into` | `(into [] (map f xs))` over one collection: a lazy seq made only to be poured out | `(into [] (map f) xs)` |
 
-These also look inside `->` and `->>` pipelines, once the steps are expanded.
+These also look inside `->` and `->>` pipelines, once the steps are expanded,
+and report at the step. A `recur` inside a `fn`, `letfn` or method body belongs
+to it, not to the loop around it.
 
 clj-kondo resolves every var; these rules match a call's head by name, with a
 `clojure.core/` qualifier removed, so a local that shadows a core name can make
@@ -248,31 +251,35 @@ since clj-kondo may need it for rules of its own.
 
 1. Summary: finding counts and project totals.
 2. Files not analyzed: anything unreadable, with the reason.
-3. Refactoring queue: functions and files over a threshold, worst first, each
+3. Since the baseline, with `--baseline` only: how many queue entries were
+   fixed, improved, got worse, are new or are unchanged, then each changed
+   entry with its score before and after and the metrics that moved. Entries
+   from files this run didn't read are listed apart, not as fixed.
+4. Refactoring queue: functions and files over a threshold, worst first, each
    with its location, line range, numbers (broken ones in bold) and what to do.
    Tests aren't queued. A function's score is weighted by its reach, so a
    complex function everything goes through ranks above an equally complex one
    nothing calls. The weight rises on a log scale from 1 with no dependents to
    2 at 100 and stays there; 100 is our choice.
-4. [Hotspots](#hotspots): complex files that keep changing. Their contents rank
+5. [Hotspots](#hotspots): complex files that keep changing. Their contents rank
    higher in the queue.
-5. [Unusual changes](#unusual-changes): commits that put far more information
+6. [Unusual changes](#unusual-changes): commits that put far more information
    into the code, or took far more out, than the ones before them.
-6. [Unusual files](#unusual-files): files whose words are far more surprising
+7. [Unusual files](#unusual-files): files whose words are far more surprising
    than the project's other files'.
-7. [Near-duplicates](#compression-and-near-duplicates): pairs of definitions
+8. [Near-duplicates](#compression-and-near-duplicates): pairs of definitions
    that are near-copies, closest first.
-8. [Abstraction opportunities](#abstraction-opportunities): code shapes that one
+9. [Abstraction opportunities](#abstraction-opportunities): code shapes that one
    function could replace, with holes where the uses differ, most saving first.
-9. Cleanup candidates: unused requires, and functions nothing mentions. A
-   require counts as used when anything it brings in is, so an idle alias next
-   to a used `:refer` isn't listed, but unused referred names are. Matching is
-   by name and can't see runtime lookups or outside callers, so check public
-   functions before removing them, and list your API namespaces in the config.
-10. [Lint findings](#lint-rules): idioms with a simpler form and likely bugs,
-    each with its rule and level.
-11. Files and Architecture: per-file numbers, coupling and dependencies.
-12. Thresholds: what the severities mean.
+10. Cleanup candidates: unused requires, and functions nothing mentions. A
+    require counts as used when anything it brings in is, so an idle alias next
+    to a used `:refer` isn't listed, but unused referred names are. Matching is
+    by name and can't see runtime lookups or outside callers, so check public
+    functions before removing them, and list your API namespaces in the config.
+11. [Lint findings](#lint-rules): idioms with a simpler form, likely bugs and
+    needless work, each with its rule and level.
+12. Files and Architecture: per-file numbers, coupling and dependencies.
+13. Thresholds: what the severities mean.
 
 | Rule | Warning | Critical | Where the limits come from |
 |---|---|---|---|
@@ -342,6 +349,12 @@ precision using all history as the baseline, so every commit in the
 
 Reading 500 commits takes a few seconds on a typical project, more when the
 commits touch large files.
+
+The mean and standard deviation stay, though median and MAD are the usual
+robust choice. Edits move entropy by hundredths of a bit and a new file by
+several bits, so against a median every added file looks extreme: over 500
+commits of seven Clojure repositories, mean and standard deviation flagged
+about 4% of commits, and median/MAD, on a log scale too, up to a third.
 
 ### Unusual files
 
@@ -479,7 +492,8 @@ EDN's 130 KB.
  "summary": {...}, "findings": [...], "hotspots": [...], "duplicates": [...],
  "abstractions": [...],
  "thresholds": {...}, "cleanup": {...}, "lints": [...],
- "errors": [...], "files": [...], "dependencies": [...]}
+ "errors": [...], "files": [...], "dependencies": [...],
+ "since_baseline": null}
 ```
 
 | Key | Holds |
@@ -498,6 +512,7 @@ EDN's 130 KB.
 | `errors` | `path`, `error` for each file not analyzed |
 | `files` | `path`, `language`, `namespace`, `loc`, `sloc`, `cloc`, `cyclomatic`, `cognitive`, `maintainability`, `efferent`, `afferent`, `instability`, `instability_band`, `changes`, `entropy`, `surprisal`, `compressed_size` (bytes), `redundancy` |
 | `dependencies` | `from`, `to` |
+| `since_baseline` | `null` without `--baseline`; with it `fixed`, `new` and `not_analyzed` (each `kind`, `name`, `path`, `line`, `score`), `improved` and `worse` (the same plus `before_score` and `changed`, metric to `before` and `after`), biggest change first, and `unchanged` (how many) |
 
 Keys are snake_case and always present, and so are values that were keywords
 (`"file_lines"`). Lists are empty, never missing. A function finding's
@@ -552,6 +567,10 @@ place. An unused require has no line of its own and points at line 1.
 ;; the Markdown report
 (report/render result)
 
+;; what changed since an earlier run's queue, as --baseline does
+(require '[metrics.baseline :as baseline])
+(baseline/with-baseline (core/analyze-dir "src") (:queue earlier-result))
+
 ;; the lean JSON and the HTML page
 (require '[metrics.json :as json] '[metrics.html :as html])
 (json/render result)   ; text; (json/report result) is the same as data
@@ -559,7 +578,8 @@ place. An unused require has no line of its own and points at line 1.
 ```
 
 A result has `:files`, `:errors`, `:edges`, `:summary`, `:queue`, `:hotspots`,
-`:unusual-changes`, `:unusual-files`, `:cleanup` and `:lints`. `analyze-files`
+`:unusual-changes`, `:unusual-files`, `:duplicates`, `:abstractions`, `:cleanup`
+and `:lints`, and `:since-baseline` once `with-baseline` adds it. `analyze-files`
 and `analyze-dir` take `:linters` to set rule levels, as in the config. Each file has `:loc`,
 `:cyclomatic`, `:cognitive`, `:halstead`, `:entropy`, `:surprisal`, `:words`,
 `:maintainability-index-without-comments`, `:functions` (per-definition
@@ -599,8 +619,9 @@ source ──► normalized model ──► pure metric visitors ──► queue
   index from the non-test Clojure files and derives each function's fan-in,
   fan-out and reach from resolved references between vars. Passing a function
   counts as a reference, the same as calling it.
-- `metrics.queue` and `metrics.cleanup` turn the numbers into work.
-- `metrics.lint` finds idioms and likely bugs in read forms; it's the Clojure
+- `metrics.queue` and `metrics.cleanup` turn the numbers into work, and
+  `metrics.baseline` compares a queue with an earlier one.
+- `metrics.lint` finds idioms, likely bugs and needless work in read forms; it's the Clojure
   adapter's `:lint`. `metrics.scanner` finds ignore markers, and
   `metrics.ignore` drops what they cover from the lint findings, the queue and
   the cleanup candidates.
@@ -673,7 +694,9 @@ The index is `171 - 5.2*ln(V) - 0.23*G - 16.2*ln(lines)`, scaled to 0..100 and
 clamped at 0. A definition uses its source lines rather than a form count,
 which would overstate nested expressions. A file uses the average of its
 definitions, as the original formula does; a sum would just measure file
-length. The report ranks on this comment-free score. `:maintainability-index`
+length. The averages are arithmetic: geometric means did no better at ranking
+268 files in five projects by their later churn and bug-fix commits, and once
+file size is accounted for, none of the variants predicted churn. The report ranks on this comment-free score. `:maintainability-index`
 adds the comment term, can exceed 100, and is informational.
 
 ## Named helpers
