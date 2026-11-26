@@ -71,7 +71,13 @@ forms ──► lint.clj ──► ignore.clj (scanner's markers drop lints/queu
   `:reach` and `:referenced?` on each function. `metrics.cleanup` goes by
   `:referenced?` where it's set (a resolved reference, an unresolved bare name,
   or the `ns/name` written out, from `metrics.mentions`), so a same-named local
-  or var elsewhere can't hide an unused function (#25).
+  or var elsewhere can't hide an unused function (#25). `annotate` also takes
+  where to look outside the files: **`metrics.references`** reads clj-kondo
+  configs' `:hooks`, bb.edn/deps.edn `:tasks` bodies (implicit `babashka.tasks`
+  refer, `:requires` aliases) and the excluded Clojure files. Excluded files are
+  indexed, but only their resolved references and written `ns/name`s count:
+  never their unresolved names, Scheme mentions, or call-graph edges, and
+  `analyze-dir` keeps them out of `:files`.
   The counting and the queue weight (`reach-factor`) live in the writ-checked
   `metrics.calls`. Methods, helpers and Scheme get nil.
 - **`metrics.lint`** is plain Clojure with behaviour tests (`lint_test.clj`): clj-kondo's
